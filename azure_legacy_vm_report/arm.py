@@ -121,10 +121,15 @@ class ArmClient:
         return self._request("GET", self.build_url(path, api_version, params), None)
 
     def post_json(
-        self, path: str, api_version: str, payload: Mapping[str, Any], params: Optional[Mapping[str, str]] = None,
+        self,
+        path: str,
+        api_version: str,
+        payload: Mapping[str, Any],
+        params: Optional[Mapping[str, str]] = None,
+        extra_headers: Optional[Mapping[str, str]] = None,
     ) -> Dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
-        return self._request("POST", self.build_url(path, api_version, params), body)
+        return self._request("POST", self.build_url(path, api_version, params), body, extra_headers=extra_headers)
 
     def list_all(
         self, path: str, api_version: str, params: Optional[Mapping[str, str]] = None,
@@ -200,7 +205,14 @@ class ArmClient:
         log.debug("Retrying in %.1fs (attempt %d)", delay, attempt + 1)
         self._sleep(delay)
 
-    def _request(self, method: str, url: str, body: Optional[bytes]) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        url: str,
+        body: Optional[bytes],
+        *,
+        extra_headers: Optional[Mapping[str, str]] = None,
+    ) -> Dict[str, Any]:
         refreshed = False
         attempt = 0
         while True:
@@ -215,6 +227,8 @@ class ArmClient:
             }
             if body is not None:
                 headers["Content-Type"] = "application/json"
+            if extra_headers:
+                headers.update(extra_headers)
             log.debug("%s %s", method, url)
             try:
                 response = self._transport.request(method, url, headers, body, self._timeout)

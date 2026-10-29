@@ -162,11 +162,19 @@ SCRIPT = """
 
   function resolveBaseline(row, source, includeDealloc) {
     var provCur = parseFloat(row.getAttribute('data-prov-cur') || '0');
+    var schedCur = parseFloat(row.getAttribute('data-sched-cur') || provCur);
     var billedNow = row.getAttribute('data-billed') === '1';
     var retailCur = (billedNow || includeDealloc) ? provCur : 0;
-    var hasCm = row.getAttribute('data-has-cm') === '1';
-    if (!hasCm || source === 'retail') {
+    var retailSchedCur = (billedNow || includeDealloc) ? schedCur : 0;
+    if (source === 'retail') {
       return retailCur;
+    }
+    if (source === 'retail-scheduled') {
+      return retailSchedCur;
+    }
+    var hasCm = row.getAttribute('data-has-cm') === '1';
+    if (!hasCm) {
+      return retailSchedCur;
     }
     var lmCost = parseFloat(row.getAttribute('data-lm-cost') || '0');
     var mtdExt = parseFloat(row.getAttribute('data-mtd-ext') || '0');
@@ -484,8 +492,10 @@ def render_html(report: Report) -> str:
         f"{_e(lm_label)} Actual Cost Only</option>"
         f'<option value="mtd"{" selected" if init_src == "mtd" else ""}>'
         f"{_e(cm_label)} MTD Extrapolated</option>"
+        '<option value="retail-scheduled">'
+        "Retail Rate \u00d7 Inferred Schedule Hours</option>"
         f'<option value="retail"{" selected" if init_src == "retail" else ""}>'
-        f"Retail List Price ({report.hours_per_month:g}h/mo Snapshot)</option>"
+        f"Retail List Price ({report.hours_per_month:g}h/mo 24\u00d77 Snapshot)</option>"
         "</select></label>",
         f'<button type="button" class="btn" data-mode="service-health" '
         f'aria-pressed="{"true" if init_mode == POLICY_SERVICE_HEALTH else "false"}">'
@@ -745,6 +755,7 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
             f'<table class="sortable" id="{vm_table_id}">',
             "<thead><tr>",
             _th("Name"),
+            _th("Workload Type"),
             _th("Subscription"),
             _th("Resource Group"),
             _th("Region"),
@@ -778,10 +789,16 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                 sched_bits.append(f"{rec.actual_last_month_hours:.0f}h last mo")
             elif rec.actual_mtd_hours is not None and rec.actual_mtd_hours > 0:
                 sched_bits.append(f"{rec.actual_mtd_hours:.0f}h MTD")
+            elif rec.inferred_hours_per_month < rec.hours_per_month:
+                sched_bits.append(f"~{rec.inferred_hours_per_month:.0f}h/mo est")
             if rec.auto_shutdown_schedule:
-                sched_bits.append(f"Auto-off: {rec.auto_shutdown_schedule}")
+                sched_bits.append(rec.auto_shutdown_schedule)
             sched_text = " \u00b7 ".join(sched_bits) if sched_bits else "\u2014"
-            sched_sort = rec.actual_last_month_hours if rec.actual_last_month_hours is not None else -1.0
+            sched_sort = (
+                rec.actual_last_month_hours
+                if rec.actual_last_month_hours is not None
+                else rec.inferred_hours_per_month
+            )
 
             billed_flag = "1" if rec.is_billed_now else "0"
             has_cm_flag = "1" if rec.actual_last_month_cost is not None else "0"
@@ -792,10 +809,12 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                 f'<tr class="vm-row" data-tenant="{_e(tid)}" data-sub="{_e(rec.subscription_id)}" '
                 f'data-sku="{_e(rec.sku)}" data-gen="{_e(rec.generation)}" '
                 f'data-prov-cur="{rec.provisioned_current_monthly:.2f}" '
+                f'data-sched-cur="{rec.schedule_adjusted_monthly:.2f}" '
                 f'data-has-cm="{has_cm_flag}" data-lm-cost="{lm_val:.2f}" data-mtd-ext="{mtd_ext_val:.2f}" '
                 f'data-billed="{billed_flag}" data-sh-pct="{rec.service_health_hike_pct:.2f}">'
                 + "".join([
                     _td(name_label, title=rec.resource_id),
+                    _td(rec.deployment_kind, cls="dim"),
                     _td(rec.subscription_name, title=rec.subscription_id),
                     _td(rec.resource_group),
                     _td(rec.region),

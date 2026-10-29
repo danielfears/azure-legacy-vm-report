@@ -111,6 +111,7 @@ def _vm_row(
     power: str = "PowerState/running",
     is_vmss: bool = False,
     capacity: int = 1,
+    tags: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     rtype = "Microsoft.Compute/virtualMachineScaleSets" if is_vmss else "Microsoft.Compute/virtualMachines"
     rid = f"/subscriptions/{sub_id}/resourceGroups/{rg}/providers/{rtype}/{name}"
@@ -121,6 +122,7 @@ def _vm_row(
         "subscriptionId": sub_id,
         "resourceGroup": rg,
         "location": region,
+        "tags": tags or {},
         "vmSize": "" if is_vmss else sku,
         "skuName": sku if is_vmss else "",
         "skuCapacity": capacity,
@@ -146,7 +148,17 @@ def _alpha_resources() -> List[Dict[str, Any]]:
         _vm_row(SUB_DATA, "rg-etl-prd-uks-001", "vmss-etl-workers", "uksouth", "Standard_F8s_v2", os_type="Linux", is_vmss=True, capacity=4),
         _vm_row(SUB_SHARED, "rg-cmg-prd-uks-001", "vm-cmg-proxy-01", "uksouth", "Standard_A4_v2", os_type="Windows"),
         # v3 legacy SKUs
-        _vm_row(SUB_CORE, "rg-aks-prd-uks-001", "aks-systempool-vmss", "uksouth", "Standard_D8s_v3", os_type="Linux", is_vmss=True, capacity=6),
+        _vm_row(
+            SUB_CORE,
+            "MC_rg-aks-prd-uks-001_aks-core-prd_uksouth",
+            "aks-systempool-vmss",
+            "uksouth",
+            "Standard_D8s_v3",
+            os_type="Linux",
+            is_vmss=True,
+            capacity=6,
+            tags={"aks-managed-poolName": "systempool"},
+        ),
         _vm_row(SUB_DATA, "rg-cache-prd-uks-001", "vm-memcache-01", "uksouth", "Standard_E16s_v3", os_type="Linux"),
         _vm_row(SUB_DATA, "rg-cache-prd-uks-001", "vm-memcache-02", "ukwest", "Standard_E16s_v3", os_type="Linux"),
         _vm_row(SUB_SHARED, "rg-eu-relay-prd-neu-001", "vm-dublin-relay-01", "northeurope", "Standard_D4s_v3", os_type="Linux"),
@@ -161,7 +173,16 @@ def _beta_resources() -> List[Dict[str, Any]]:
     return [
         _vm_row(SUB_DEV, "rg-dev-uks-001", "vm-dev-b2ms-01", "uksouth", "Standard_B2ms", os_type="Linux"),
         _vm_row(SUB_DEV, "rg-dev-uks-001", "vm-dev-ds3v2-01", "uksouth", "Standard_DS3_v2", os_type="Linux"),
-        _vm_row(SUB_DEV, "rg-dev-uks-001", "vm-dev-d4sv3-01", "westeurope", "Standard_D4s_v3", os_type="Windows", license_type="Windows_Server"),
+        _vm_row(
+            SUB_DEV,
+            "rg-dev-uks-001",
+            "vm-dev-d4sv3-01",
+            "westeurope",
+            "Standard_D4s_v3",
+            os_type="Windows",
+            license_type="Windows_Server",
+            tags={"Autostartup": "true", "Autoshutdown": "true"},
+        ),
         _vm_row(SUB_DEV, "rg-dev-uks-001", "vm-dev-stopped-01", "uksouth", "Standard_D2s_v3", os_type="Linux", power="PowerState/deallocated"),
     ]
 

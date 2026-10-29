@@ -12,10 +12,11 @@ from .auth import AuthError, TokenProvider, is_guid
 from .config import TenantSpec
 from .costmgmt import (
     ActualVmUsage,
-    VmScheduleInfo,
+    ScheduleCatalog,
     compute_billing_window,
+    fetch_schedule_catalog,
     fetch_subscription_actual_costs,
-    fetch_vm_schedules,
+    infer_workload_and_schedule,
 )
 from .dates import UTC
 from .model import (
@@ -45,11 +46,25 @@ FETCH_FAILED = "failed"
 
 ARG_VM_QUERY = """\
 Resources
-| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'
-| project id, name, type, subscriptionId, resourceGroup, location,
-    vmSize = tostring(properties.hardwareProfile.vmSize),
+| where type in~ (
+    'microsoft.compute/virtualmachines',
+    'microsoft.compute/virtualmachinescalesets',
+    'microsoft.batch/batchaccounts/pools',
+    'microsoft.machinelearningservices/workspaces/computes'
+)
+| project id, name, type, subscriptionId, resourceGroup, location, tags,
+    vmssId = tolower(tostring(properties.virtualMachineScaleSet.id)),
+    vmSize = coalesce(
+        tostring(properties.hardwareProfile.vmSize),
+        tostring(properties.vmSize),
+        tostring(properties.properties.vmSize)
+    ),
     skuName = tostring(sku.name),
-    skuCapacity = toint(sku.capacity),
+    skuCapacity = coalesce(
+        toint(sku.capacity),
+        toint(properties.scaleSettings.fixedScale.targetDedicatedNodes) + toint(properties.scaleSettings.fixedScale.targetLowPriorityNodes),
+        toint(properties.properties.scaleSettings.minNodeCount)
+    ),
     osType = coalesce(
         tostring(properties.storageProfile.osDisk.osType),
         tostring(properties.virtualMachineProfile.storageProfile.osDisk.osType)
@@ -62,7 +77,11 @@ Resources
         tostring(properties.priority),
         tostring(properties.virtualMachineProfile.priority)
     ),
-    powerState = tostring(properties.extended.instanceView.powerState.code)
+    powerState = coalesce(
+        tostring(properties.extended.instanceView.powerState.code),
+        tostring(properties.allocationState),
+        tostring(properties.properties.allocationState)
+    )
 """
 
 
@@ -179,17 +198,35 @@ def collect_tenant(
     candidates: List[Tuple[Dict[str, Any], SkuInfo, bool, str, int]] = []
     subs_with_legacy: Dict[str, List[str]] = {}
 
+    # Identify Flexible VM Scale Sets that already have child Microsoft.Compute/virtualMachines
+    # in the result set so we never double-count the parent scale set and its child VMs.
+    vmss_with_child_vms: Set[str] = {
+        str(r.get("vmssId") or "").strip().lower()
+        for r in raw_rows
+        if str(r.get("type") or "").strip().lower() == "microsoft.compute/virtualmachines"
+        and str(r.get("vmssId") or "").strip()
+    }
+
     for row in raw_rows:
         rtype = str(row.get("type") or "").strip().lower()
-        is_vmss = rtype == "microsoft.compute/virtualmachinescalesets"
-        if is_vmss and not options.include_vmss:
+        rid = str(row.get("id") or "")
+        if rtype == "microsoft.compute/virtualmachinescalesets" and rid.lower() in vmss_with_child_vms:
+            continue
+        is_scale_resource = rtype in (
+            "microsoft.compute/virtualmachinescalesets",
+            "microsoft.batch/batchaccounts/pools",
+            "microsoft.machinelearningservices/workspaces/computes",
+        )
+        if rtype == "microsoft.compute/virtualmachinescalesets" and not options.include_vmss:
             continue
         sub_id = str(row.get("subscriptionId") or "").strip().lower()
         if allowed_subs is not None and sub_id not in allowed_subs:
             continue
 
-        raw_sku = str(row.get("skuName") if is_vmss else row.get("vmSize") or "").strip()
-        capacity = _safe_int(row.get("skuCapacity"), default=1) if is_vmss else 1
+        raw_sku = str(row.get("skuName") or row.get("vmSize") or "").strip()
+        if not raw_sku:
+            continue
+        capacity = _safe_int(row.get("skuCapacity"), default=1) if is_scale_resource else 1
         data.total_resources_scanned += 1
         data.total_instances_scanned += max(0, capacity)
 
@@ -200,18 +237,51 @@ def collect_tenant(
         if sku_info.generation.lower() not in allowed_gens:
             continue
 
-        rid = str(row.get("id") or "")
-        candidates.append((row, sku_info, is_vmss, sub_id, capacity))
+        candidates.append((row, sku_info, is_scale_resource, sub_id, capacity))
         if rid and sub_id:
             subs_with_legacy.setdefault(sub_id, []).append(rid)
 
-    schedules: Dict[str, VmScheduleInfo] = {}
-    if candidates and options.use_resource_graph:
-        schedules = fetch_vm_schedules(
+    catalog = ScheduleCatalog()
+    if options.use_resource_graph:
+        catalog = fetch_schedule_catalog(
             client,
             target_subs if target_subs else None,
             api_version=options.resource_graph_api,
         )
+
+    # Also check AKS agentPoolProfiles for any legacy node pools that have no backing VMSS in raw_rows
+    for pool in catalog.aks_pools:
+        if allowed_subs is not None and pool.subscription_id not in allowed_subs:
+            continue
+        sku_info = classify_vm_sku(pool.vm_size)
+        if sku_info is None or sku_info.generation.lower() not in allowed_gens:
+            continue
+        # Check if a backing VMSS in the nodeResourceGroup already represents this pool
+        already_present = any(
+            sub_id == pool.subscription_id
+            and str(r.get("resourceGroup") or "").strip().lower() == pool.node_resource_group
+            and (
+                str((r.get("tags") or {}).get("aks-managed-poolName") or "").strip().lower() == pool.pool_name.lower()
+                or pool.pool_name.lower() in str(r.get("name") or "").strip().lower()
+            )
+            for r, _, _, sub_id, _ in candidates
+        )
+        if not already_present and options.include_vmss:
+            synth_id = f"{pool.cluster_id}/agentPools/{pool.pool_name}"
+            synth_row: Dict[str, Any] = {
+                "id": synth_id,
+                "name": f"{pool.cluster_name}/{pool.pool_name}",
+                "type": "Microsoft.ContainerService/managedClusters",
+                "subscriptionId": pool.subscription_id,
+                "resourceGroup": pool.resource_group,
+                "location": pool.location,
+                "skuName": pool.vm_size,
+                "skuCapacity": pool.count,
+                "osType": pool.os_type,
+                "powerState": f"PowerState/{pool.power_state.lower()}",
+                "tags": {"aks-managed-poolName": pool.pool_name},
+            }
+            candidates.append((synth_row, sku_info, True, pool.subscription_id, pool.count))
 
     usage_by_rid: Dict[str, ActualVmUsage] = {}
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
@@ -272,11 +342,27 @@ def collect_tenant(
 
     for row, sku_info, is_vmss, sub_id, capacity in candidates:
         rid = str(row.get("id") or "")
+        rtype_raw = str(row.get("type") or "")
+        rname = str(row.get("name") or "")
+        rg_name = str(row.get("resourceGroup") or "")
         region = str(row.get("location") or "uksouth").strip().lower()
         os_type = normalise_os_type(row.get("osType"), row.get("licenseType"))
         license_type = str(row.get("licenseType") or "").strip()
         priority = normalise_priority(row.get("priority"))
         power_state = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
+        tags = row.get("tags") if isinstance(row.get("tags"), dict) else {}
+        sched_info = catalog.by_resource_id.get(rid.lower())
+
+        deployment_kind, schedule_summary, inferred_hours = infer_workload_and_schedule(
+            resource_type_raw=rtype_raw,
+            name=rname,
+            resource_group=rg_name,
+            subscription_id=sub_id,
+            tags=tags,
+            schedule_info=sched_info,
+            aks_pools_by_key=catalog.aks_pools_by_key,
+            default_hours=options.hours_per_month,
+        )
 
         quote = pricing.quote(
             sku_info,
@@ -287,13 +373,13 @@ def collect_tenant(
         )
         record = build_legacy_record(
             resource_id=rid,
-            name=str(row.get("name") or ""),
+            name=rname,
             resource_type=TYPE_VMSS if is_vmss else TYPE_VM,
             tenant_id=data.spec.tenant_id,
             tenant_name=data.display_name,
             subscription_id=sub_id,
             subscription_name=names.subscription_label(sub_id),
-            resource_group=str(row.get("resourceGroup") or ""),
+            resource_group=rg_name,
             region=region,
             sku_info=sku_info,
             instance_count=capacity,
@@ -307,7 +393,10 @@ def collect_tenant(
             include_deallocated_cost=options.include_deallocated_cost,
             cost_source=options.cost_source,
             actual_usage=usage_by_rid.get(rid.lower()),
-            schedule_info=schedules.get(rid.lower()),
+            schedule_info=sched_info,
+            deployment_kind=deployment_kind,
+            schedule_summary=schedule_summary,
+            inferred_hours_per_month=inferred_hours,
         )
         data.records.append(record)
 
@@ -491,6 +580,7 @@ def _normalise_arm_vm(vm: Mapping[str, Any], sub_id: str) -> Dict[str, Any]:
         "subscriptionId": sub_id,
         "resourceGroup": _resource_group_from_id(rid),
         "location": str(vm.get("location") or ""),
+        "tags": vm.get("tags") if isinstance(vm.get("tags"), dict) else {},
         "vmSize": str(hw.get("vmSize") or ""),
         "osType": str(os_disk.get("osType") or ""),
         "licenseType": str(props.get("licenseType") or ""),
@@ -513,6 +603,7 @@ def _normalise_arm_vmss(vmss: Mapping[str, Any], sub_id: str) -> Dict[str, Any]:
         "subscriptionId": sub_id,
         "resourceGroup": _resource_group_from_id(rid),
         "location": str(vmss.get("location") or ""),
+        "tags": vmss.get("tags") if isinstance(vmss.get("tags"), dict) else {},
         "skuName": str(sku.get("name") or ""),
         "skuCapacity": sku.get("capacity", 0),
         "osType": str(os_disk.get("osType") or ""),

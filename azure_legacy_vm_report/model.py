@@ -73,6 +73,7 @@ class LegacyVmRecord:
     resource_id: str
     name: str
     resource_type: str
+    deployment_kind: str
     tenant_id: str
     tenant_name: str
     subscription_id: str
@@ -97,8 +98,10 @@ class LegacyVmRecord:
     pricing_model: str
     price_source: str
     hours_per_month: float
+    inferred_hours_per_month: float
     provisioned_current_monthly: float
     retail_active_monthly: float
+    schedule_adjusted_monthly: float
     actual_last_month_cost: Optional[float]
     actual_last_month_hours: Optional[float]
     actual_mtd_cost: Optional[float]
@@ -128,6 +131,7 @@ class LegacyVmRecord:
             "resource_id": self.resource_id,
             "name": self.name,
             "resource_type": self.resource_type,
+            "deployment_kind": self.deployment_kind,
             "tenant_id": self.tenant_id,
             "tenant_name": self.tenant_name,
             "subscription_id": self.subscription_id,
@@ -154,8 +158,10 @@ class LegacyVmRecord:
             "price_source": self.price_source,
             "cost_basis_used": self.cost_basis_used,
             "hours_per_month": self.hours_per_month,
+            "inferred_hours_per_month": round(self.inferred_hours_per_month, 1),
             "provisioned_current_monthly": round(self.provisioned_current_monthly, 2),
             "retail_active_monthly": round(self.retail_active_monthly, 2),
+            "schedule_adjusted_monthly": round(self.schedule_adjusted_monthly, 2),
             "actual_last_month_cost": (
                 round(self.actual_last_month_cost, 2) if self.actual_last_month_cost is not None else None
             ),
@@ -224,12 +230,21 @@ def build_legacy_record(
     cost_source: str = COST_SOURCE_AUTO,
     actual_usage: Optional[ActualVmUsage] = None,
     schedule_info: Optional[VmScheduleInfo] = None,
+    deployment_kind: str = "",
+    schedule_summary: str = "",
+    inferred_hours_per_month: Optional[float] = None,
 ) -> LegacyVmRecord:
     billed_now = is_power_state_billed(power_state) and instance_count > 0
     active_for_cost = billed_now or (include_deallocated_cost and instance_count > 0)
 
+    eff_inferred_hours = hours_per_month if inferred_hours_per_month is None else inferred_hours_per_month
     prov_current = round(quote.hourly_rate * hours_per_month * max(0, instance_count), 2)
     retail_active = prov_current if active_for_cost else 0.0
+    sched_active = (
+        round(quote.hourly_rate * eff_inferred_hours * max(0, instance_count), 2)
+        if active_for_cost
+        else 0.0
+    )
 
     has_cm = actual_usage is not None and actual_usage.has_data
     last_mo_cost = round(actual_usage.last_month_cost, 2) if has_cm and actual_usage else None
@@ -238,14 +253,17 @@ def build_legacy_record(
     mtd_ext_cost = round(actual_usage.mtd_extrapolated_cost, 2) if has_cm and actual_usage else None
     mtd_hrs = round(actual_usage.mtd_hours, 1) if has_cm and actual_usage else None
 
-    if not has_cm or cost_source == COST_SOURCE_RETAIL:
+    if cost_source == COST_SOURCE_RETAIL:
         current_mo = retail_active
         basis_used = "retail-730h"
+    elif not has_cm:
+        current_mo = sched_active
+        basis_used = "retail-scheduled" if eff_inferred_hours != hours_per_month else "retail-730h"
     elif cost_source == COST_SOURCE_LAST_MONTH:
-        current_mo = last_mo_cost if last_mo_cost is not None else retail_active
+        current_mo = last_mo_cost if last_mo_cost is not None else sched_active
         basis_used = "last-month-actual"
     elif cost_source == COST_SOURCE_MTD:
-        current_mo = mtd_ext_cost if mtd_ext_cost is not None else retail_active
+        current_mo = mtd_ext_cost if mtd_ext_cost is not None else sched_active
         basis_used = "mtd-extrapolated"
     else:  # COST_SOURCE_AUTO
         if last_mo_cost is not None and last_mo_cost > 0:
@@ -258,8 +276,8 @@ def build_legacy_record(
             current_mo = prov_current if (include_deallocated_cost and instance_count > 0) else 0.0
             basis_used = "last-month-actual"
         else:
-            current_mo = retail_active
-            basis_used = "retail-730h"
+            current_mo = sched_active
+            basis_used = "retail-scheduled" if eff_inferred_hours != hours_per_month else "retail-730h"
 
     hike_pct, hike_reason = policy.hike_pct_for(sku_info, region)
     multiplier = 1.0 + (hike_pct / 100.0)
@@ -278,11 +296,14 @@ def build_legacy_record(
     )
     lic_upper = (license_type or "").strip().upper()
     ahb = lic_upper in ("WINDOWS_SERVER", "WINDOWS_CLIENT", "RHEL_BYOS", "SLES_BYOS")
+    kind_label = deployment_kind or ("VM Scale Set" if resource_type == TYPE_VMSS else "Standalone VM")
+    sched_label = schedule_summary or _format_schedule(schedule_info)
 
     return LegacyVmRecord(
         resource_id=resource_id,
         name=name,
         resource_type=resource_type,
+        deployment_kind=kind_label,
         tenant_id=tenant_id,
         tenant_name=tenant_name,
         subscription_id=subscription_id,
@@ -307,14 +328,16 @@ def build_legacy_record(
         pricing_model=quote.pricing_model,
         price_source=quote.source,
         hours_per_month=hours_per_month,
+        inferred_hours_per_month=eff_inferred_hours,
         provisioned_current_monthly=prov_current,
         retail_active_monthly=retail_active,
+        schedule_adjusted_monthly=sched_active,
         actual_last_month_cost=last_mo_cost,
         actual_last_month_hours=last_mo_hrs,
         actual_mtd_cost=mtd_cost,
         actual_mtd_extrapolated_cost=mtd_ext_cost,
         actual_mtd_hours=mtd_hrs,
-        auto_shutdown_schedule=_format_schedule(schedule_info),
+        auto_shutdown_schedule=sched_label,
         cost_basis_used=basis_used,
         current_monthly=current_mo,
         hike_pct=hike_pct,

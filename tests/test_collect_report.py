@@ -169,5 +169,11 @@ class CollectAndReportTests(unittest.TestCase):
         self.assertEqual(by_name_ret["vm-dev-b2ms-01"].cost_basis_used, "retail-730h")
         self.assertAlmostEqual(by_name_ret["vm-dev-b2ms-01"].current_monthly, 50.59, places=2)
         self.assertAlmostEqual(by_name_ret["vm-dev-stopped-01"].current_monthly, 0.0, places=2)
+        # Runbook-tagged VM has inferred 260h/mo schedule
+        d4s_ret = by_name_ret["vm-dev-d4sv3-01"]
+        self.assertIn("Runbook: Autostartup+Autoshutdown", d4s_ret.auto_shutdown_schedule)
+        self.assertAlmostEqual(d4s_ret.inferred_hours_per_month, 260.0, places=1)
+        self.assertLess(d4s_ret.schedule_adjusted_monthly, d4s_ret.retail_active_monthly)
+
 
 

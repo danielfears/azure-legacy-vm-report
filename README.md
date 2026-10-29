@@ -29,7 +29,15 @@ az login --use-device-code --allow-no-subscriptions
 ./azure-legacy-vm-report-windows --tenant <tenant-id> --format console,csv,html --open
 ```
 
-## How legacy v1, v2 and v3 SKUs are identified
+## How legacy v1, v2 and v3 SKUs & workload types are identified
+
+The tool scans across all VM-backed compute types in a tenant:
+
+- **Standalone Virtual Machines (`Microsoft.Compute/virtualMachines`)**
+- **Virtual Machine Scale Sets (`Microsoft.Compute/virtualMachineScaleSets`)** — both Uniform and Flexible orchestration (automatically deduplicating child VMs of Flexible scale sets so instances are never double-counted).
+- **AKS Node Pools (`Microsoft.ContainerService/managedClusters`)** — correlates backing `MC_*` VM Scale Sets with their parent AKS cluster and node pool name (`AKS Node Pool (<cluster>/<pool>)`), including `enableAutoScaling` (`minCount..maxCount`), and surfaces any legacy AKS node pools even if scaled to zero.
+- **Azure Batch Pools (`Microsoft.Batch/batchAccounts/pools`)** and **Azure Machine Learning Compute (`Microsoft.MachineLearningServices/workspaces/computes`)**.
+- **Workload classification (`deployment_kind`):** tags and resource metadata classify each resource as `Standalone VM`, `VM Scale Set`, `AKS Node Pool (<cluster>/<pool>)`, `OpenShift / ARO Node`, `Databricks Node`, `AVD Session Host`, `DevTest Lab VM`, `Batch Pool`, `ML Compute`, or `Ephemeral / CI Job VM`.
 
 In Azure Resource Manager, many **v1** VM sizes do **not** have a `_v1` suffix in `hardwareProfile.vmSize`
 (for example `Standard_B2s`, `Standard_B4ms`, `Standard_D2`, `Standard_DS2`, `Standard_F4s`, `Standard_G2`,
@@ -75,11 +83,13 @@ By default (`--cost-source auto`), the tool queries **both** **Azure Cost Manage
 
 1. **Actual billed spend (`auto` / `last-month` / `mtd`):**
    - Queries per-VM `ActualCost` and `UsageQuantity` (billed compute hours) for the **last complete calendar month** and **current month-to-date (MTD)**.
-   - Using actual billed spend automatically captures **auto-shutdown schedules** (`microsoft.devtestlab/schedules` are also discovered and shown per VM), part-time running hours, Azure Hybrid Benefit (AHB), and negotiated EA/MCA/CSP rates.
+   - Using actual billed spend automatically captures **every scheduling mechanism** (built-in Portal auto-shutdown, Azure Automation start/stop runbooks, Logic Apps, AKS Cluster Autoscaler, Azure Monitor Autoscale, AVD scaling plans, and manual start/stop), as well as Azure Hybrid Benefit (AHB) and negotiated EA/MCA/CSP rates.
    - For newly deployed VMs that had `0` spend last month, `auto` falls back to their **extrapolated current month-to-date** spend.
-2. **Retail List Price fallback (`retail`):**
-   - If the signed-in identity does not have Cost Management read access on a subscription (or if `--cost-source retail` is passed), the tool calculates `hourly_rate × --hours-per-month` (default `730` hours/month) from the Azure Retail Prices API in `--currency` (default `GBP`, configurable to `USD`, `EUR`, etc.), respecting Linux vs Windows, AHB (`Windows_Server` / `Windows_Client`), Spot/Low Priority, and power state (`Running` / `Stopped (allocated)` vs `Deallocated`).
-   - Inside the interactive HTML report, you can switch between **Actual Billed (Last Month / Auto)**, **Last Month Actual Only**, **Current MTD Extrapolated**, and **Retail 730h/mo Snapshot** live in the browser.
+2. **Multi-source schedule, runbook & autoscaler inference (`retail-scheduled` & fallback):**
+   - **Portal VM Auto-shutdown (`microsoft.devtestlab/schedules`):** Azure's built-in VM Auto-shutdown blade (`Operations -> Auto-shutdown` on any standard IaaS VM) stores its schedule as a `Microsoft.DevTestLab/schedules` resource (`shutdown-computevm-<vmName>`).
+   - **Automation Runbook / Tag schedules:** inspects VM and scale-set tags (`Autoshutdown`, `Autostartup`, `Schedule`, `StartStopSchedule`, `ShutdownSchedule`, `StopTime`, `StartTime`, `Uptime`, `PowerSchedule`, `WorkingHours`).
+   - **AKS Cluster Autoscaler & Azure Monitor Autoscale (`microsoft.insights/autoscalesettings`):** surfaces `AKS Autoscale (min..max)` and `Autoscale On/Off (min..max)`.
+   - When Cost Management is unavailable for a subscription (or when you select **Retail Rate × Inferred Schedule Hours** in the HTML report), VMs with active start/stop runbook tags (`~260h/mo`), daily auto-shutdown schedules (`~365h/mo`), or ephemeral CI/image-builder tags (`~20h/mo`) are costed using their inferred duty cycle rather than blindly assuming 730h/mo (24×7).
 
 ## Output formats
 
