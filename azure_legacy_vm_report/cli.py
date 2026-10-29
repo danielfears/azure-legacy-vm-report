@@ -588,6 +588,17 @@ def _emit_outputs(
         except OSError as exc:
             raise CliError(f"Could not write report files to {target_dir}: {exc}") from None
 
+    if written and not args.quiet:
+        for path in written:
+            _progress(err, f"Wrote {path}")
+
+    html_files = [path for path in written if path.suffix.lower() == ".html"]
+    should_open = args.open or (bool(html_files) and hasattr(out, "isatty") and out.isatty())
+    if html_files and should_open:
+        warn = open_in_browser(html_files[0], env=environ)
+        if warn and not args.quiet:
+            _progress(err, warn)
+
     if FORMAT_CONSOLE in formats:
         tty = hasattr(out, "isatty") and out.isatty()
         use_color = tty and not args.no_color and not environ.get("NO_COLOR")
@@ -600,17 +611,6 @@ def _emit_outputs(
             out.flush()
         except BrokenPipeError:
             raise
-
-    if written and not args.quiet:
-        for path in written:
-            _progress(err, f"Wrote {path}")
-
-    html_files = [path for path in written if path.suffix.lower() == ".html"]
-    should_open = args.open or (bool(html_files) and hasattr(out, "isatty") and out.isatty())
-    if html_files and should_open:
-        warn = open_in_browser(html_files[0], env=environ)
-        if warn and not args.quiet:
-            _progress(err, warn)
 
     if all(t.fatal for t in report.tenants):
         return EXIT_FAILED
