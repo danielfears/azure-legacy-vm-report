@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Command-line entry point for azure-legacy-vm-report."""
+
+from __future__ import annotations
+
+import sys
+
+from azure_legacy_vm_report.cli import run_cli
+
+if __name__ == "__main__":
+    sys.exit(run_cli())

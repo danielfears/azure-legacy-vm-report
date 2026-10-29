@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run azure-legacy-vm-report with the Windows Azure CLI and Python, from inside WSL.
+#
+# Use this when the Linux Azure CLI cannot sign in because Windows sends Microsoft Entra traffic
+# through a client (for example Global Secure Access) that only tunnels Windows processes.
+#
+#   ./azure-legacy-vm-report-windows login <tenant-id-or-domain>   sign in with the Windows Azure CLI
+#   ./azure-legacy-vm-report-windows <options>                      same options as ./azure-legacy-vm-report
+#
+# Reports go under your Windows profile (%USERPROFILE%\azure-legacy-vm-reports) unless --out-dir says otherwise.
+set -euo pipefail
+
+fail() {
+  printf 'azure-legacy-vm-report-windows: %s\n' "$*" >&2
+  exit 2
+}
+
+[[ -n "${WSL_DISTRO_NAME:-}" ]] || fail "this helper only works inside WSL."
+command -v wslpath >/dev/null 2>&1 || fail "wslpath is missing."
+command -v cmd.exe >/dev/null 2>&1 || fail "cmd.exe is not reachable; enable Windows interop in WSL."
+
+here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+
+# Windows looks in the current directory before PATH, and this script runs from the profile folder (below), so a
+# stray az.cmd there would shadow the real Azure CLI. This variable switches that lookup off for every Windows
+# process started from here.
+export NoDefaultCurrentDirectoryInExePath=1
+export WSLENV="NoDefaultCurrentDirectoryInExePath${WSLENV:+:$WSLENV}"
+
+# A Linux working directory reaches cmd.exe as a UNC path, which it rejects with a warning on stdout
+# (that would corrupt the Azure CLI's JSON), so work from the Windows profile directory instead.
+cd "$(wslpath -u "C:\\")"
+profile=$(cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r' || true)
+if [[ -n "$profile" ]] && profile_dir=$(wslpath -u "$profile" 2>/dev/null) && [[ -d "$profile_dir" ]]; then
+  cd "$profile_dir"
+fi
+
+if [[ "${1:-}" == "login" ]]; then
+  tenant="${2:-}"
+  if [[ $# -eq 1 ]]; then
+    explorer.exe "https://login.microsoft.com/device" >/dev/null 2>&1 || true
+    exec cmd.exe /c az login --scope "https://management.azure.com//.default" \
+      --use-device-code --allow-no-subscriptions
+  fi
+  [[ $# -eq 2 && "$tenant" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] ||
+    fail "usage: ${0##*/} login [tenant-id-or-domain]"
+  explorer.exe "https://login.microsoft.com/device" >/dev/null 2>&1 || true
+  exec cmd.exe /c az login --tenant "$tenant" --scope "https://management.azure.com//.default" \
+    --use-device-code --allow-no-subscriptions
+fi
+
+python_exe=$(command -v python.exe) || fail "python.exe (Windows Python 3.9 or later) is not on the WSL PATH."
+"$python_exe" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' >/dev/null 2>&1 ||
+  fail "$python_exe is not a working Python 3.9 or later."
+
+export PYTHONPATH="$here" PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 AZURE_LEGACY_VM_REPORT_WSL_HELPER="$0"
+export WSLENV="PYTHONPATH/p:PYTHONUTF8:PYTHONDONTWRITEBYTECODE:AZURE_LEGACY_VM_REPORT_WSL_HELPER${WSLENV:+:$WSLENV}"
+exec "$python_exe" -m azure_legacy_vm_report "$@"

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "azure-legacy-vm-report"
+dynamic = ["version"]
+description = "Inventory v1, v2 and v3 Azure VM SKUs across one or more tenants and model current vs February 2027 post-hike monthly costs"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+azure-legacy-vm-report = "azure_legacy_vm_report.cli:run_cli"
+
+[tool.setuptools]
+packages = ["azure_legacy_vm_report"]
+
+[tool.setuptools.dynamic]
+version = { attr = "azure_legacy_vm_report.__version__" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded CSS and JavaScript in the HTML report are deliberately compact single lines.
+"azure_legacy_vm_report/htmlout.py" = ["E501"]
