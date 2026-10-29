@@ -14,7 +14,7 @@ from .dates import UTC
 log = logging.getLogger("azure_legacy_vm_report.costmgmt")
 
 SCHEDULE_ARG_QUERY = "Resources | where type =~ 'microsoft.devtestlab/schedules' | project name, properties"
-_CHUNK_SIZE = 150
+_CHUNK_SIZE = 500
 
 
 @dataclass(frozen=True)
