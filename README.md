@@ -1,4 +1,4 @@
-# azure-legacy-vm-report
+# Azure Legacy VM Reporting Tool
 
 Inventories every deployed **v1, v2 and v3 Azure Virtual Machine** (and **Virtual Machine Scale Set**)
 across one or more Azure tenants, calculates their **current monthly cost**, and projects what they
