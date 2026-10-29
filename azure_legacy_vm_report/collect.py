@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -287,7 +288,7 @@ def collect_tenant(
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
             token_key, tokens, endpoint, transport,
-            timeout=min(options.timeout, 25.0), max_retries=0, **extra,
+            timeout=min(options.timeout, 15.0), max_retries=0, **extra,
         )
         # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
         # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
@@ -299,45 +300,50 @@ def collect_tenant(
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
         # Azure Cost Management enforces a 12-queries-per-10-seconds burst limit per tenant.
-        # In 'auto' mode, prioritise the top 10 active subscriptions (which typically cover >96% of spend)
+        # In 'auto' mode, prioritise the top 8 active subscriptions (which typically cover >95% of spend)
         # unless the user explicitly filtered subscriptions via --subscription.
-        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 10:
-            ordered_subs = ordered_subs[:10]
-        throttled_subs: List[str] = []
-        for sub_id in ordered_subs:
-            rids = subs_with_legacy[sub_id]
-            data.cost_management_subs_queried += 1
-            sub_usage, warn = fetch_subscription_actual_costs(
+        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 8:
+            ordered_subs = ordered_subs[:8]
+
+        def _query_one_sub(sub_id: str) -> Tuple[str, Dict[str, ActualVmUsage], Optional[str]]:
+            u_map, err_msg = fetch_subscription_actual_costs(
                 cm_client,
                 sub_id,
-                rids,
+                subs_with_legacy[sub_id],
                 window,
                 api_version=options.cost_management_api,
             )
+            return sub_id, u_map, err_msg
+
+        data.cost_management_subs_queried = len(ordered_subs)
+        if len(ordered_subs) <= 1:
+            cm_results = [_query_one_sub(s) for s in ordered_subs]
+        else:
+            with ThreadPoolExecutor(max_workers=min(4, len(ordered_subs))) as pool:
+                cm_results = list(pool.map(_query_one_sub, ordered_subs))
+
+        throttled_count = 0
+        for sub_id, sub_usage, warn in cm_results:
             if warn:
                 if "429" in warn or "TooManyRequests" in warn or "throttled" in warn.lower():
-                    throttled_subs.append(names.subscription_label(sub_id))
-                    remaining = [
-                        names.subscription_label(s)
-                        for s in ordered_subs[ordered_subs.index(sub_id) + 1:]
-                    ]
-                    throttled_subs.extend(remaining)
-                    break
-                data.issues.append(Issue(
-                    LEVEL_INFO,
-                    "cost-management",
-                    f"{warn}; using Retail API rates for {names.subscription_label(sub_id)}.",
-                ))
+                    throttled_count += 1
+                else:
+                    data.issues.append(Issue(
+                        LEVEL_INFO,
+                        "cost-management",
+                        f"{warn}; using schedule-adjusted Retail rates for {names.subscription_label(sub_id)}.",
+                    ))
             else:
                 data.cost_management_subs_succeeded += 1
                 usage_by_rid.update(sub_usage)
 
-        if throttled_subs:
+        if throttled_count:
             data.issues.append(Issue(
                 LEVEL_INFO,
                 "cost-management",
-                f"Cost Management rate-limited after {data.cost_management_subs_succeeded} top subscription(s); "
-                f"using Retail API rates for the remaining {len(throttled_subs)} smaller subscription(s).",
+                f"Cost Management rate-limited on {throttled_count} subscription(s) "
+                f"({data.cost_management_subs_succeeded} top subscription(s) succeeded); "
+                "using schedule-adjusted Retail rates for the remainder.",
             ))
 
     for row, sku_info, is_vmss, sub_id, capacity in candidates:
