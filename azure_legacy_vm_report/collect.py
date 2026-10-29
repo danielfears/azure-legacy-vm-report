@@ -217,7 +217,7 @@ def collect_tenant(
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
             token_key, tokens, endpoint, transport,
-            timeout=min(options.timeout, 25.0), max_retries=0, **extra,
+            timeout=min(options.timeout, 30.0), max_retries=2, **extra,
         )
         # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
         # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
