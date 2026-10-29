@@ -215,16 +215,39 @@ def collect_tenant(
 
     usage_by_rid: Dict[str, ActualVmUsage] = {}
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
-        for sub_id, rids in subs_with_legacy.items():
+        cm_client = ArmClient(
+            token_key, tokens, endpoint, transport,
+            timeout=min(options.timeout, 25.0), max_retries=0, **extra,
+        )
+        # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
+        # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
+        sub_vcpus: Dict[str, int] = {}
+        for row, sku_info, is_vmss, sub_id, capacity in candidates:
+            pstate = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
+            weight = sku_info.vcpus * max(1, capacity) * (10 if pstate != "Deallocated" else 1)
+            sub_vcpus[sub_id] = sub_vcpus.get(sub_id, 0) + weight
+
+        ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
+        throttled_subs: List[str] = []
+        for sub_id in ordered_subs:
+            rids = subs_with_legacy[sub_id]
             data.cost_management_subs_queried += 1
             sub_usage, warn = fetch_subscription_actual_costs(
-                client,
+                cm_client,
                 sub_id,
                 rids,
                 window,
                 api_version=options.cost_management_api,
             )
             if warn:
+                if "429" in warn or "TooManyRequests" in warn or "throttled" in warn.lower():
+                    throttled_subs.append(names.subscription_label(sub_id))
+                    remaining = [
+                        names.subscription_label(s)
+                        for s in ordered_subs[ordered_subs.index(sub_id) + 1:]
+                    ]
+                    throttled_subs.extend(remaining)
+                    break
                 data.issues.append(Issue(
                     LEVEL_INFO,
                     "cost-management",
@@ -233,6 +256,14 @@ def collect_tenant(
             else:
                 data.cost_management_subs_succeeded += 1
                 usage_by_rid.update(sub_usage)
+
+        if throttled_subs:
+            data.issues.append(Issue(
+                LEVEL_INFO,
+                "cost-management",
+                f"Cost Management rate-limited after {data.cost_management_subs_succeeded} top subscription(s); "
+                f"using Retail API rates for the remaining {len(throttled_subs)} smaller subscription(s).",
+            ))
 
     for row, sku_info, is_vmss, sub_id, capacity in candidates:
         rid = str(row.get("id") or "")
