@@ -228,6 +228,11 @@ def collect_tenant(
             sub_vcpus[sub_id] = sub_vcpus.get(sub_id, 0) + weight
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
+        # Azure Cost Management enforces a ~15-20 request burst bucket per client/tenant before returning 429.
+        # In 'auto' mode, prioritise the top 15 active subscriptions (which typically cover >98% of spend)
+        # unless the user explicitly filtered subscriptions via --subscription.
+        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 15:
+            ordered_subs = ordered_subs[:15]
         throttled_subs: List[str] = []
         for sub_id in ordered_subs:
             rids = subs_with_legacy[sub_id]
