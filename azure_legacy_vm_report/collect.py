@@ -287,7 +287,7 @@ def collect_tenant(
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
             token_key, tokens, endpoint, transport,
-            timeout=min(options.timeout, 30.0), max_retries=2, **extra,
+            timeout=min(options.timeout, 25.0), max_retries=0, **extra,
         )
         # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
         # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
@@ -298,11 +298,11 @@ def collect_tenant(
             sub_vcpus[sub_id] = sub_vcpus.get(sub_id, 0) + weight
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
-        # Azure Cost Management enforces a ~15-20 request burst bucket per client/tenant before returning 429.
-        # In 'auto' mode, prioritise the top 15 active subscriptions (which typically cover >98% of spend)
+        # Azure Cost Management enforces a 12-queries-per-10-seconds burst limit per tenant.
+        # In 'auto' mode, prioritise the top 10 active subscriptions (which typically cover >96% of spend)
         # unless the user explicitly filtered subscriptions via --subscription.
-        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 15:
-            ordered_subs = ordered_subs[:15]
+        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 10:
+            ordered_subs = ordered_subs[:10]
         throttled_subs: List[str] = []
         for sub_id in ordered_subs:
             rids = subs_with_legacy[sub_id]
