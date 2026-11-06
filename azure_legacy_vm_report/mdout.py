@@ -31,7 +31,7 @@ def _table(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List
 
 def _gen_cells(label: str, summary: GenerationSummary, cur: str, ok: bool) -> List[str]:
     if not ok:
-        return [label, summary.generation] + ["n/a"] * 7
+        return [label, summary.generation] + ["n/a"] * 9
     return [
         label,
         summary.generation,
@@ -42,6 +42,8 @@ def _gen_cells(label: str, summary: GenerationSummary, cur: str, ok: bool) -> Li
         format_money(summary.monthly_delta, cur, signed=True),
         format_money(summary.annual_delta, cur, signed=True),
         format_pct(summary.effective_hike_pct, signed=True),
+        format_money(summary.target_v5_monthly, cur),
+        format_money(summary.target_v5_savings_vs_feb, cur, signed=True),
     ]
 
 
@@ -73,6 +75,8 @@ def render_markdown(report: Report) -> str:
         "Increase / mo",
         "Increase / yr",
         "Hike %",
+        "Target v5 / mo",
+        "Save vs Feb / mo",
     ]
     rows: List[List[str]] = []
     for tenant in report.tenants:
@@ -88,7 +92,7 @@ def render_markdown(report: Report) -> str:
             rows.append(_gen_cells("All tenants", by_gen[gen], cur, any_ok))
         rows.append(_gen_cells("All tenants", report.grand_total(), cur, any_ok))
 
-    lines += _table(headers, rows, ["l", "l", "r", "r", "r", "r", "r", "r", "r"])
+    lines += _table(headers, rows, ["l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "r"])
 
     missing = report.missing_tenants()
     if missing:

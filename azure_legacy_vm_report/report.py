@@ -38,6 +38,14 @@ class GenerationSummary:
     provisioned_monthly_delta: float = 0.0
     legacy_25_feb_monthly: float = 0.0
     service_health_feb_monthly: float = 0.0
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+    target_v5_3yr_ri_monthly: float = 0.0
+    target_current_monthly: float = 0.0
+    target_current_savings_vs_feb: float = 0.0
+    target_current_3yr_ri_monthly: float = 0.0
+    ri_covered_instances: int = 0
+    advisor_rightsize_count: int = 0
 
     @property
     def effective_hike_pct(self) -> float:
@@ -65,6 +73,14 @@ class GenerationSummary:
             "provisioned_monthly_delta": round(self.provisioned_monthly_delta, 2),
             "legacy_25_feb_monthly": round(self.legacy_25_feb_monthly, 2),
             "service_health_feb_monthly": round(self.service_health_feb_monthly, 2),
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
+            "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+            "target_current_monthly": round(self.target_current_monthly, 2),
+            "target_current_savings_vs_feb": round(self.target_current_savings_vs_feb, 2),
+            "target_current_3yr_ri_monthly": round(self.target_current_3yr_ri_monthly, 2),
+            "ri_covered_instances": self.ri_covered_instances,
+            "advisor_rightsize_count": self.advisor_rightsize_count,
         }
 
 
@@ -93,6 +109,13 @@ class SkuBreakdownRow:
     retirement_date: str = ""
     recommended_v5: str = ""
     recommended_current: str = ""
+    target_v5_sku: str = ""
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+    target_v5_3yr_ri_monthly: float = 0.0
+    target_current_sku: str = ""
+    target_current_monthly: float = 0.0
+    target_current_savings_vs_feb: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -119,6 +142,13 @@ class SkuBreakdownRow:
             "retirement_date": self.retirement_date,
             "recommended_v5": self.recommended_v5,
             "recommended_current": self.recommended_current,
+            "target_v5_sku": self.target_v5_sku,
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
+            "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+            "target_current_sku": self.target_current_sku,
+            "target_current_monthly": round(self.target_current_monthly, 2),
+            "target_current_savings_vs_feb": round(self.target_current_savings_vs_feb, 2),
         }
 
 
@@ -126,6 +156,7 @@ class SkuBreakdownRow:
 class SubscriptionBreakdownRow:
     subscription_id: str
     subscription_name: str
+    management_group: str = "Tenant Root"
     v1_instances: int = 0
     v2_instances: int = 0
     v3_instances: int = 0
@@ -137,11 +168,15 @@ class SubscriptionBreakdownRow:
     annual_delta: float = 0.0
     provisioned_current_monthly: float = 0.0
     provisioned_feb_monthly: float = 0.0
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+    target_v5_3yr_ri_monthly: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "subscription_id": self.subscription_id,
             "subscription_name": self.subscription_name,
+            "management_group": self.management_group,
             "v1_instances": self.v1_instances,
             "v2_instances": self.v2_instances,
             "v3_instances": self.v3_instances,
@@ -153,6 +188,67 @@ class SubscriptionBreakdownRow:
             "annual_delta": round(self.annual_delta, 2),
             "provisioned_current_monthly": round(self.provisioned_current_monthly, 2),
             "provisioned_feb_monthly": round(self.provisioned_feb_monthly, 2),
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
+            "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+        }
+
+
+@dataclass
+class MigrationWaveRow:
+    wave: str
+    resource_count: int = 0
+    instance_count: int = 0
+    total_vcpus: int = 0
+    current_monthly: float = 0.0
+    feb_monthly: float = 0.0
+    monthly_delta: float = 0.0
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+    target_v5_3yr_ri_monthly: float = 0.0
+    target_current_monthly: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "wave": self.wave,
+            "resource_count": self.resource_count,
+            "instance_count": self.instance_count,
+            "total_vcpus": self.total_vcpus,
+            "current_monthly": round(self.current_monthly, 2),
+            "feb_monthly": round(self.feb_monthly, 2),
+            "monthly_delta": round(self.monthly_delta, 2),
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
+            "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+            "target_current_monthly": round(self.target_current_monthly, 2),
+        }
+
+
+@dataclass
+class ManagementGroupBreakdownRow:
+    management_group: str
+    subscription_count: int = 0
+    total_instances: int = 0
+    total_vcpus: int = 0
+    current_monthly: float = 0.0
+    feb_monthly: float = 0.0
+    monthly_delta: float = 0.0
+    annual_delta: float = 0.0
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "management_group": self.management_group,
+            "subscription_count": self.subscription_count,
+            "total_instances": self.total_instances,
+            "total_vcpus": self.total_vcpus,
+            "current_monthly": round(self.current_monthly, 2),
+            "feb_monthly": round(self.feb_monthly, 2),
+            "monthly_delta": round(self.monthly_delta, 2),
+            "annual_delta": round(self.annual_delta, 2),
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
         }
 
 
@@ -163,6 +259,8 @@ class TenantReport:
     total_summary: GenerationSummary
     sku_rows: List[SkuBreakdownRow]
     subscription_rows: List[SubscriptionBreakdownRow]
+    wave_rows: List[MigrationWaveRow] = field(default_factory=list)
+    management_group_rows: List[ManagementGroupBreakdownRow] = field(default_factory=list)
 
     @property
     def tenant_id(self) -> str:
@@ -211,6 +309,8 @@ class TenantReport:
             "total": self.total_summary.to_dict(),
             "skus": [row.to_dict() for row in self.sku_rows],
             "subscriptions": [row.to_dict() for row in self.subscription_rows],
+            "waves": [row.to_dict() for row in self.wave_rows],
+            "management_groups": [row.to_dict() for row in self.management_group_rows],
             "vms": [rec.to_dict() for rec in self.records],
             "issues": [issue.to_dict() for issue in self.issues],
         }
@@ -344,6 +444,16 @@ def _summarise_records(label: str, records: Iterable[LegacyVmRecord]) -> Generat
         summary.service_health_feb_monthly += round(
             rec.current_monthly * (1.0 + rec.service_health_hike_pct / 100.0), 2
         )
+        summary.target_v5_monthly += rec.target_v5_monthly
+        summary.target_v5_savings_vs_feb += rec.target_v5_savings_vs_feb
+        summary.target_v5_3yr_ri_monthly += rec.target_v5_3yr_ri_monthly
+        summary.target_current_monthly += rec.target_current_monthly
+        summary.target_current_savings_vs_feb += rec.target_current_savings_vs_feb
+        summary.target_current_3yr_ri_monthly += rec.target_current_3yr_ri_monthly
+        if "RI Covered" in rec.ri_status or "Partial RI" in rec.ri_status:
+            summary.ri_covered_instances += rec.instance_count
+        if rec.advisor_recommendation:
+            summary.advisor_rightsize_count += 1
     summary.current_monthly = round(summary.current_monthly, 2)
     summary.feb_monthly = round(summary.feb_monthly, 2)
     summary.monthly_delta = round(summary.monthly_delta, 2)
@@ -353,6 +463,12 @@ def _summarise_records(label: str, records: Iterable[LegacyVmRecord]) -> Generat
     summary.provisioned_monthly_delta = round(summary.provisioned_monthly_delta, 2)
     summary.legacy_25_feb_monthly = round(summary.legacy_25_feb_monthly, 2)
     summary.service_health_feb_monthly = round(summary.service_health_feb_monthly, 2)
+    summary.target_v5_monthly = round(summary.target_v5_monthly, 2)
+    summary.target_v5_savings_vs_feb = round(summary.target_v5_savings_vs_feb, 2)
+    summary.target_v5_3yr_ri_monthly = round(summary.target_v5_3yr_ri_monthly, 2)
+    summary.target_current_monthly = round(summary.target_current_monthly, 2)
+    summary.target_current_savings_vs_feb = round(summary.target_current_savings_vs_feb, 2)
+    summary.target_current_3yr_ri_monthly = round(summary.target_current_3yr_ri_monthly, 2)
     return summary
 
 
@@ -381,6 +497,8 @@ def _summarise_skus(records: Sequence[LegacyVmRecord]) -> List[SkuBreakdownRow]:
                 retirement_date=rec.retirement_date,
                 recommended_v5=rec.recommended_v5,
                 recommended_current=rec.recommended_current,
+                target_v5_sku=rec.target_v5_sku,
+                target_current_sku=rec.target_current_sku,
             )
             by_sku[rec.sku] = row
             regions_seen[rec.sku] = set()
@@ -404,6 +522,13 @@ def _summarise_skus(records: Sequence[LegacyVmRecord]) -> List[SkuBreakdownRow]:
         row.annual_delta = round(row.annual_delta + rec.annual_delta, 2)
         row.provisioned_current_monthly = round(row.provisioned_current_monthly + rec.provisioned_current_monthly, 2)
         row.provisioned_feb_monthly = round(row.provisioned_feb_monthly + rec.provisioned_feb_monthly, 2)
+        row.target_v5_monthly = round(row.target_v5_monthly + rec.target_v5_monthly, 2)
+        row.target_v5_savings_vs_feb = round(row.target_v5_savings_vs_feb + rec.target_v5_savings_vs_feb, 2)
+        row.target_v5_3yr_ri_monthly = round(row.target_v5_3yr_ri_monthly + rec.target_v5_3yr_ri_monthly, 2)
+        row.target_current_monthly = round(row.target_current_monthly + rec.target_current_monthly, 2)
+        row.target_current_savings_vs_feb = round(
+            row.target_current_savings_vs_feb + rec.target_current_savings_vs_feb, 2
+        )
 
     for sku, row in by_sku.items():
         row.regions = sorted(regions_seen[sku])
@@ -431,6 +556,7 @@ def _summarise_subscriptions(records: Sequence[LegacyVmRecord]) -> List[Subscrip
             row = SubscriptionBreakdownRow(
                 subscription_id=rec.subscription_id,
                 subscription_name=rec.subscription_name,
+                management_group=rec.management_group,
             )
             by_sub[key] = row
         if rec.generation == "v1":
@@ -447,11 +573,59 @@ def _summarise_subscriptions(records: Sequence[LegacyVmRecord]) -> List[Subscrip
         row.annual_delta = round(row.annual_delta + rec.annual_delta, 2)
         row.provisioned_current_monthly = round(row.provisioned_current_monthly + rec.provisioned_current_monthly, 2)
         row.provisioned_feb_monthly = round(row.provisioned_feb_monthly + rec.provisioned_feb_monthly, 2)
+        row.target_v5_monthly = round(row.target_v5_monthly + rec.target_v5_monthly, 2)
+        row.target_v5_savings_vs_feb = round(row.target_v5_savings_vs_feb + rec.target_v5_savings_vs_feb, 2)
+        row.target_v5_3yr_ri_monthly = round(row.target_v5_3yr_ri_monthly + rec.target_v5_3yr_ri_monthly, 2)
 
     return sorted(
         by_sub.values(),
         key=lambda r: (-r.monthly_delta, -r.current_monthly, -r.provisioned_current_monthly, r.subscription_name.lower()),
     )
+
+
+def _summarise_waves(records: Sequence[LegacyVmRecord]) -> List[MigrationWaveRow]:
+    by_wave: Dict[str, MigrationWaveRow] = {}
+    for rec in records:
+        w = rec.migration_wave or "Wave 1: Drop-in v5 Resize (SCSI)"
+        row = by_wave.get(w)
+        if row is None:
+            row = MigrationWaveRow(wave=w)
+            by_wave[w] = row
+        row.resource_count += 1
+        row.instance_count += rec.instance_count
+        row.total_vcpus += rec.total_vcpus
+        row.current_monthly = round(row.current_monthly + rec.current_monthly, 2)
+        row.feb_monthly = round(row.feb_monthly + rec.feb_monthly, 2)
+        row.monthly_delta = round(row.monthly_delta + rec.monthly_delta, 2)
+        row.target_v5_monthly = round(row.target_v5_monthly + rec.target_v5_monthly, 2)
+        row.target_v5_savings_vs_feb = round(row.target_v5_savings_vs_feb + rec.target_v5_savings_vs_feb, 2)
+        row.target_v5_3yr_ri_monthly = round(row.target_v5_3yr_ri_monthly + rec.target_v5_3yr_ri_monthly, 2)
+        row.target_current_monthly = round(row.target_current_monthly + rec.target_current_monthly, 2)
+    return sorted(by_wave.values(), key=lambda r: r.wave)
+
+
+def _summarise_management_groups(records: Sequence[LegacyVmRecord]) -> List[ManagementGroupBreakdownRow]:
+    by_mg: Dict[str, ManagementGroupBreakdownRow] = {}
+    subs_by_mg: Dict[str, set] = {}
+    for rec in records:
+        mg = rec.management_group or "Tenant Root"
+        row = by_mg.get(mg)
+        if row is None:
+            row = ManagementGroupBreakdownRow(management_group=mg)
+            by_mg[mg] = row
+            subs_by_mg[mg] = set()
+        subs_by_mg[mg].add(rec.subscription_id.lower())
+        row.total_instances += rec.instance_count
+        row.total_vcpus += rec.total_vcpus
+        row.current_monthly = round(row.current_monthly + rec.current_monthly, 2)
+        row.feb_monthly = round(row.feb_monthly + rec.feb_monthly, 2)
+        row.monthly_delta = round(row.monthly_delta + rec.monthly_delta, 2)
+        row.annual_delta = round(row.annual_delta + rec.annual_delta, 2)
+        row.target_v5_monthly = round(row.target_v5_monthly + rec.target_v5_monthly, 2)
+        row.target_v5_savings_vs_feb = round(row.target_v5_savings_vs_feb + rec.target_v5_savings_vs_feb, 2)
+    for mg, row in by_mg.items():
+        row.subscription_count = len(subs_by_mg[mg])
+    return sorted(by_mg.values(), key=lambda r: (-r.monthly_delta, -r.current_monthly, r.management_group.lower()))
 
 
 def build_report(
@@ -478,6 +652,8 @@ def build_report(
         total = _summarise_records("Total", data.records)
         skus = _summarise_skus(data.records)
         subs = _summarise_subscriptions(data.records)
+        waves = _summarise_waves(data.records)
+        mgs = _summarise_management_groups(data.records)
         tenant_reports.append(
             TenantReport(
                 data=data,
@@ -485,6 +661,8 @@ def build_report(
                 total_summary=total,
                 sku_rows=skus,
                 subscription_rows=subs,
+                wave_rows=waves,
+                management_group_rows=mgs,
             )
         )
     return Report(

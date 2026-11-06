@@ -119,3 +119,34 @@ class SkuClassificationTests(unittest.TestCase):
         self.assertEqual(d8s.sku, "Standard_D8s_v3")
         self.assertEqual(d2s.sku, "Standard_D2s_v3")
 
+    def test_concrete_target_skus_and_ri_block_flags(self) -> None:
+        f16 = classify_vm_sku("Standard_F16s_v2")
+        d8v3 = classify_vm_sku("Standard_D8s_v3")
+        e16v3 = classify_vm_sku("Standard_E16s_v3")
+        b2s = classify_vm_sku("Standard_B2s")
+        assert f16 and d8v3 and e16v3 and b2s
+
+        self.assertEqual(f16.target_v5_sku, "Standard_D16ls_v5")
+        self.assertEqual(f16.target_current_sku, "Standard_F16als_v6")
+        self.assertTrue(f16.ri_purchase_blocked)
+
+        self.assertEqual(d8v3.target_v5_sku, "Standard_D8s_v5")
+        self.assertEqual(d8v3.target_current_sku, "Standard_D8s_v6")
+        self.assertEqual(d8v3.target_quota_family, "standardDSv5Family")
+        self.assertTrue(d8v3.ri_purchase_blocked)
+
+        self.assertEqual(e16v3.target_v5_sku, "Standard_E16s_v5")
+        self.assertEqual(e16v3.target_current_sku, "Standard_E16s_v6")
+        self.assertTrue(e16v3.ri_purchase_blocked)
+
+        self.assertEqual(b2s.target_v5_sku, "Standard_B2ls_v2")
+        self.assertTrue(b2s.ri_purchase_blocked)
+
+    def test_include_modern_regional_skus_option(self) -> None:
+        self.assertIsNone(classify_vm_sku("Standard_D4s_v5", include_modern_regional=False))
+        d4v5 = classify_vm_sku("Standard_D4s_v5", include_modern_regional=True)
+        assert d4v5 is not None
+        self.assertEqual(d4v5.generation, "v5")
+        self.assertFalse(d4v5.in_global_25_notice)
+        self.assertFalse(d4v5.ri_purchase_blocked)
+

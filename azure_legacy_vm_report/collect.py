@@ -15,9 +15,14 @@ from .costmgmt import (
     ActualVmUsage,
     ScheduleCatalog,
     compute_billing_window,
+    evaluate_quota_headroom,
+    extract_cost_allocation_tag,
+    fetch_active_vm_reservations,
     fetch_schedule_catalog,
     fetch_subscription_actual_costs,
+    fetch_subscription_compute_quotas,
     infer_workload_and_schedule,
+    match_reservation_for_vm,
 )
 from .dates import UTC
 from .model import (
@@ -190,6 +195,7 @@ def collect_tenant(
 
     data.fetch_status = FETCH_OK
     allowed_gens: Set[str] = {g.lower() for g in options.generations}
+    include_modern = any(g in allowed_gens for g in ("v4", "v5", "v6"))
     allowed_subs: Optional[Set[str]] = {s.lower() for s in target_subs} if target_subs else None
 
     window = compute_billing_window(options.as_of or datetime.now(UTC))
@@ -231,7 +237,7 @@ def collect_tenant(
         data.total_resources_scanned += 1
         data.total_instances_scanned += max(0, capacity)
 
-        sku_info = classify_vm_sku(raw_sku)
+        sku_info = classify_vm_sku(raw_sku, include_modern_regional=include_modern)
         if sku_info is None:
             data.modern_resources_skipped += 1
             continue
@@ -249,12 +255,23 @@ def collect_tenant(
             target_subs if target_subs else None,
             api_version=options.resource_graph_api,
         )
+        if candidates:
+            catalog.reservations = fetch_active_vm_reservations(client)
+            sub_region_pairs = [
+                (sub_id, str(r.get("location") or "uksouth").strip().lower())
+                for r, _, _, sub_id, _ in candidates
+            ]
+            catalog.quota_by_sub_region_family = fetch_subscription_compute_quotas(
+                client,
+                sub_region_pairs,
+                api_version=options.compute_api,
+            )
 
     # Also check AKS agentPoolProfiles for any legacy node pools that have no backing VMSS in raw_rows
     for pool in catalog.aks_pools:
         if allowed_subs is not None and pool.subscription_id not in allowed_subs:
             continue
-        sku_info = classify_vm_sku(pool.vm_size)
+        sku_info = classify_vm_sku(pool.vm_size, include_modern_regional=include_modern)
         if sku_info is None or sku_info.generation.lower() not in allowed_gens:
             continue
         # Check if a backing VMSS in the nodeResourceGroup already represents this pool
@@ -377,6 +394,41 @@ def collect_tenant(
             license_type=license_type,
             priority=priority,
         )
+        target_v5_quote = pricing.quote_target_sku(
+            sku_info.target_v5_sku,
+            sku_info.vcpus,
+            region,
+            os_type=os_type,
+            license_type=license_type,
+            priority=priority,
+        )
+        target_current_quote = pricing.quote_target_sku(
+            sku_info.target_current_sku,
+            sku_info.vcpus,
+            region,
+            os_type=os_type,
+            license_type=license_type,
+            priority=priority,
+        )
+        mg_label = catalog.management_groups_by_sub.get(sub_id, "Tenant Root")
+        cost_tag = extract_cost_allocation_tag(tags)
+        ri_status, ri_expiry = match_reservation_for_vm(
+            catalog.reservations,
+            subscription_id=sub_id,
+            region=region,
+            sku=sku_info.sku,
+            parent_sku=sku_info.parent_sku,
+            instance_count=capacity,
+            ri_purchase_blocked=sku_info.ri_purchase_blocked,
+        )
+        adv_info = catalog.advisor_by_resource_id.get(rid.lower())
+        q_status = evaluate_quota_headroom(
+            catalog.quota_by_sub_region_family,
+            subscription_id=sub_id,
+            region=region,
+            target_quota_family=sku_info.target_quota_family,
+            needed_vcpus=sku_info.vcpus * max(1, capacity),
+        )
         record = build_legacy_record(
             resource_id=rid,
             name=rname,
@@ -403,6 +455,14 @@ def collect_tenant(
             deployment_kind=deployment_kind,
             schedule_summary=schedule_summary,
             inferred_hours_per_month=inferred_hours,
+            target_v5_quote=target_v5_quote,
+            target_current_quote=target_current_quote,
+            management_group=mg_label,
+            cost_allocation_tag=cost_tag,
+            ri_status=ri_status,
+            ri_expiry_date=ri_expiry,
+            advisor_info=adv_info,
+            quota_status=q_status,
         )
         data.records.append(record)
 

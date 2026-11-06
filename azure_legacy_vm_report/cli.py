@@ -73,7 +73,7 @@ from .pricing import (
     PricingClient,
 )
 from .report import Report, build_report
-from .skus import LEGACY_GENERATIONS
+from .skus import EXTENDED_GENERATIONS, LEGACY_GENERATIONS
 from .textfmt import clean_text, plural
 from .transport import Transport, UrllibTransport
 
@@ -122,9 +122,10 @@ class UsageError(CliError):
     status = EXIT_USAGE
 
 
-def parse_generations(values: Sequence[str]) -> Tuple[str, ...]:
+def parse_generations(values: Sequence[str], *, include_regional_skus: bool = False) -> Tuple[str, ...]:
+    allowed = EXTENDED_GENERATIONS if include_regional_skus else LEGACY_GENERATIONS
     if not values:
-        return LEGACY_GENERATIONS
+        return allowed
     chosen = []
     seen = set()
     for val in values:
@@ -134,14 +135,14 @@ def parse_generations(values: Sequence[str]) -> Tuple[str, ...]:
                 continue
             if not g.startswith("v"):
                 g = "v" + g
-            if g not in LEGACY_GENERATIONS:
+            if g not in allowed:
                 raise UsageError(f"Unknown VM generation {part.strip()!r}. Choose from v1, v2, v3.")
             if g not in seen:
                 seen.add(g)
                 chosen.append(g)
     if not chosen:
         raise UsageError("No VM generation was selected.")
-    return tuple(g for g in LEGACY_GENERATIONS if g in seen)
+    return tuple(g for g in allowed if g in seen)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -176,7 +177,11 @@ def build_parser() -> argparse.ArgumentParser:
     model = parser.add_argument_group("SKU & February 2027 price-hike model")
     model.add_argument(
         "--generation", "-g", action="append", default=[], metavar="GEN[,GEN]",
-        help="Legacy VM generations to include: v1, v2, v3 (default: v1,v2,v3).",
+        help="VM generations to include: v1, v2, v3 (default: v1,v2,v3; also supports v4,v5,v6).",
+    )
+    model.add_argument(
+        "--include-regional-skus", action="store_true",
+        help="Include modern v4, v5 and v6 VM series alongside v1-v3 (useful for the 7 EU/APAC regional-hike regions).",
     )
     model.add_argument(
         "--hike-model", choices=VALID_POLICIES, default=POLICY_SERVICE_HEALTH,
@@ -306,7 +311,10 @@ def _validate_args(args: argparse.Namespace) -> Tuple[List[str], Tuple[str, ...]
     if args.open and FORMAT_HTML not in formats:
         formats.append(FORMAT_HTML)
 
-    generations = parse_generations(args.generation)
+    generations = parse_generations(
+        args.generation,
+        include_regional_skus=bool(getattr(args, "include_regional_skus", False)),
+    )
     try:
         sub_filter = parse_subscription_filter(args.subscription)
     except ConfigError as exc:

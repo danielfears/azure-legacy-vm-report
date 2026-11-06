@@ -9,11 +9,16 @@ from typing import Dict, Optional, Tuple
 GEN_V1 = "v1"
 GEN_V2 = "v2"
 GEN_V3 = "v3"
+GEN_V4 = "v4"
+GEN_V5 = "v5"
+GEN_V6 = "v6"
 LEGACY_GENERATIONS = (GEN_V1, GEN_V2, GEN_V3)
+EXTENDED_GENERATIONS = (GEN_V1, GEN_V2, GEN_V3, GEN_V4, GEN_V5, GEN_V6)
 
 STAGE_EOL = "End of Life"
 STAGE_RETIRED = "Retired"
 STAGE_EXTENDED = "Extended"
+STAGE_CURRENT = "Current"
 
 _CLASSIC_A_VCPUS: Dict[str, int] = {
     "EXTRASMALL": 1,
@@ -75,6 +80,76 @@ _NSeriesV1 = re.compile(r"^(?P<fam>NC|ND|NV)(?P<num>\d+)(?:R|RS|S)?$", re.IGNORE
 _DCSeriesV1 = re.compile(r"^DC(?P<num>\d+)S$", re.IGNORECASE)
 
 
+_STD_D_VCPUS = (2, 4, 8, 16, 32, 48, 64, 96)
+_STD_E_VCPUS = (2, 4, 8, 16, 20, 32, 48, 64, 96)
+_STD_L_VCPUS = (8, 16, 32, 48, 64, 80)
+_STD_B_VCPUS = (2, 4, 8, 16, 32)
+
+
+def _snap_size(vcpus: int, allowed: Tuple[int, ...]) -> int:
+    for val in allowed:
+        if val >= vcpus:
+            return val
+    return allowed[-1]
+
+
+def _resolve_concrete_targets(sku: str, series: str, vcpus: int) -> Tuple[str, str, str]:
+    """Return ``(target_v5_sku, target_current_sku, target_quota_family)`` for a legacy SKU."""
+    up_sku = (sku or "").upper()
+    ser = (series or "").strip()
+    d_n = _snap_size(max(2, vcpus), _STD_D_VCPUS)
+    e_n = _snap_size(max(2, vcpus), _STD_E_VCPUS)
+    l_n = _snap_size(max(8, vcpus), _STD_L_VCPUS)
+    b_n = _snap_size(max(2, vcpus), _STD_B_VCPUS)
+
+    if ser in ("Bv1", "Bsv2", "Basv2", "Bpsv2"):
+        if "B1LS" in up_sku:
+            v5_sku = "Standard_B2ts_v2"
+        elif "B1S" in up_sku or "B2S" in up_sku:
+            v5_sku = "Standard_B2ls_v2"
+        else:
+            v5_sku = f"Standard_B{b_n}s_v2"
+        return v5_sku, f"Standard_D{d_n}ls_v6", "standardBSv2Family"
+
+    if ser in ("Av1", "Basic_A", "Av2"):
+        if vcpus <= 2:
+            return "Standard_B2s_v2", "Standard_D2ls_v6", "standardBSv2Family"
+        return f"Standard_D{d_n}ls_v5", f"Standard_D{d_n}ls_v6", "standardDlsv5Family"
+
+    if ser in ("Amv2", "Ev3", "Esv3", "G", "Gs", "Ev4", "Esv4"):
+        return f"Standard_E{e_n}s_v5", f"Standard_E{e_n}s_v6", "standardESv5Family"
+
+    if ser in ("F", "Fs", "Fsv2"):
+        return f"Standard_D{d_n}ls_v5", f"Standard_F{d_n}als_v6", "standardDlsv5Family"
+
+    if ser in ("Ls", "Lsv1", "Lsv2", "Lsv3", "Lasv3"):
+        return f"Standard_L{l_n}s_v3", f"Standard_L{l_n}s_v4", "standardLsv3Family"
+
+    if ser in ("DCs", "DCsv2", "DCsv3", "DCdsv3"):
+        return f"Standard_DC{d_n}as_v5", f"Standard_DC{d_n}as_v6", "standardDCasv5Family"
+
+    if ser in ("HB", "HBv2", "HC", "H"):
+        return "Standard_HB120rs_v3", "Standard_HB176rs_v4", "standardHBv3Family"
+
+    if ser in ("M", "Msv2/Mdsv2"):
+        m_n = _snap_size(max(32, vcpus), (32, 64, 128, 192))
+        return f"Standard_M{m_n}s_v2", f"Standard_M{m_n}s_v3", "standardMSv2Family"
+
+    if ser in ("NP", "NVv3", "NCv3", "NCasT4_v3", "NC", "ND", "NV"):
+        return "Standard_NV36ads_A10_v5", "Standard_NC24ads_A100_v4", "standardNVadsA10v5Family"
+
+    return f"Standard_D{d_n}s_v5", f"Standard_D{d_n}s_v6", "standardDSv5Family"
+
+
+def _is_ri_purchase_blocked(generation: str, series: str, in_global_25_notice: bool) -> bool:
+    """True when Microsoft ended new 1Y/3Y RI purchases & renewals on 01/07/2026."""
+    if in_global_25_notice or generation == GEN_V1:
+        return True
+    if series in ("Dv3", "Dsv3", "Ev3", "Esv3", "DCsv3", "DCdsv3", "NVv3", "NCv3"):
+        return True
+    return False
+
+
 @dataclass(frozen=True)
 class SkuInfo:
     sku: str
@@ -90,6 +165,25 @@ class SkuInfo:
     recommended_current: str
     disk_controller_note: str
     in_global_25_notice: bool
+    target_v5_sku: str = ""
+    target_current_sku: str = ""
+    target_quota_family: str = ""
+    ri_purchase_blocked: bool = False
+
+    def __post_init__(self) -> None:
+        v5_sku, cur_sku, q_fam = _resolve_concrete_targets(self.sku, self.series, self.vcpus)
+        if not self.target_v5_sku:
+            object.__setattr__(self, "target_v5_sku", v5_sku)
+        if not self.target_current_sku:
+            object.__setattr__(self, "target_current_sku", cur_sku)
+        if not self.target_quota_family:
+            object.__setattr__(self, "target_quota_family", q_fam)
+        if not self.ri_purchase_blocked:
+            object.__setattr__(
+                self,
+                "ri_purchase_blocked",
+                _is_ri_purchase_blocked(self.generation, self.series, self.in_global_25_notice),
+            )
 
 
 _SkuBodyParts = re.compile(
@@ -116,8 +210,8 @@ def parent_unconstrained_sku(sku: str) -> str:
     return re.sub(r"(\d+)-\d+", r"\1", sku)
 
 
-def classify_vm_sku(raw_sku: str) -> Optional[SkuInfo]:
-    """Return legacy ``SkuInfo`` if ``raw_sku`` is a v1, v2 or v3 Azure VM SKU, else ``None``."""
+def classify_vm_sku(raw_sku: str, *, include_modern_regional: bool = False) -> Optional[SkuInfo]:
+    """Return ``SkuInfo`` if ``raw_sku`` is a v1, v2 or v3 Azure VM SKU (or v4-v6 when ``include_modern_regional`` is set)."""
     text = (raw_sku or "").strip()
     if not text:
         return None
@@ -155,7 +249,8 @@ def classify_vm_sku(raw_sku: str) -> Optional[SkuInfo]:
     match_v = _ExplicitV.match(canonical)
     if match_v:
         gen_num = int(match_v.group("gen"))
-        if gen_num not in (1, 2, 3):
+        allowed_nums = (1, 2, 3, 4, 5, 6) if include_modern_regional else (1, 2, 3)
+        if gen_num not in allowed_nums:
             return None
         gen = f"v{gen_num}"
         body = match_v.group("body")
@@ -451,23 +546,41 @@ def _classify_versioned(canonical: str, body: str, gen: str) -> SkuInfo:
                 in_global_25_notice=False,
             )
 
-    # Generic fallback for any other _v1, _v2 or _v3 SKU
+    # Generic fallback for any other _v1.._v6 SKU
     vcpus, active = _extract_vcpus(up, "")
     prefix_match = re.match(r"^([A-Za-z]+)", body)
-    fam = (prefix_match.group(1) if prefix_match else "VM") + gen
+    fam_prefix = (prefix_match.group(1) if prefix_match else "VM").upper()
+    has_s = "S" in up[len(fam_prefix):]
+    fam = f"{fam_prefix}{'s' if has_s else ''}{gen}"
+    is_modern = gen in (GEN_V4, GEN_V5, GEN_V6)
+    category = "Memory optimised" if fam_prefix.startswith("E") else (
+        "Compute optimised" if fam_prefix.startswith("F") else (
+            "Storage optimised" if fam_prefix.startswith("L") else "General purpose"
+        )
+    )
     return SkuInfo(
         sku=canonical,
         parent_sku=parent,
         generation=gen,
         series=fam,
-        category="General purpose",
+        category=category,
         vcpus=vcpus,
         active_vcpus=active,
-        lifecycle_stage=STAGE_EOL if gen in (GEN_V1, GEN_V2) else STAGE_EXTENDED,
-        retirement_date="15/11/2028" if gen in (GEN_V1, GEN_V2) else "15/11/2029",
-        recommended_v5="Dsv5 / Esv5",
-        recommended_current="Dsv6 / Esv6",
-        disk_controller_note="Verify Gen2, NVMe and MANA prerequisites before resizing",
+        lifecycle_stage=(
+            STAGE_CURRENT if gen in (GEN_V5, GEN_V6)
+            else (STAGE_EXTENDED if gen in (GEN_V3, GEN_V4) else STAGE_EOL)
+        ),
+        retirement_date=(
+            "Not announced" if is_modern
+            else ("15/11/2028" if gen in (GEN_V1, GEN_V2) else "15/11/2029")
+        ),
+        recommended_v5="Esv5 / Edsv5" if fam_prefix.startswith("E") else "Dsv5 / Ddsv5",
+        recommended_current="Esv6 / Edsv6" if fam_prefix.startswith("E") else "Dsv6 / Ddsv6",
+        disk_controller_note=(
+            "Current-generation SKU (exposed to regional hike in 7 EU/APAC regions)"
+            if is_modern
+            else "Verify Gen2, NVMe and MANA prerequisites before resizing"
+        ),
         in_global_25_notice=gen in (GEN_V1, GEN_V2),
     )
 

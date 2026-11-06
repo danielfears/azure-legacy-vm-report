@@ -137,6 +137,14 @@ def render_console(report: Report, *, width: Optional[int] = None, color: bool =
             f"{paint(format_money(gt.annual_delta, cur, signed=True) + '/yr', 'bad' if gt.annual_delta > 0 else 'ok')} "
             f"({format_money(gt.current_monthly * 12.0, cur)}/yr -> {format_money(gt.feb_monthly * 12.0, cur)}/yr)"
         )
+        v5_ri_save = round(gt.feb_monthly - gt.target_v5_3yr_ri_monthly, 2)
+        emit(
+            f"  Post-migration target (v5 PAYG):   "
+            f"{paint(format_money(gt.target_v5_monthly, cur) + '/mo', 'ok')} "
+            f"(saves {paint(format_money(gt.target_v5_savings_vs_feb, cur) + '/mo', 'ok')} vs Feb 2027; "
+            f"or {paint(format_money(gt.target_v5_3yr_ri_monthly, cur) + '/mo', 'ok')} with 3-Year RI/SP, "
+            f"saving {paint(format_money(v5_ri_save, cur) + '/mo', 'ok')})"
+        )
         if gt.deallocated_instances > 0 and not report.include_deallocated_cost:
             emit(
                 paint(

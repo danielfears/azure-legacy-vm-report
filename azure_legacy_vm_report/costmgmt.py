@@ -25,6 +25,18 @@ Resources
 | project id, name, type=tolower(type), subscriptionId=tolower(subscriptionId),
     resourceGroup=tolower(resourceGroup), location=tolower(location), properties
 """
+
+CONTAINERS_ARG_QUERY = """\
+ResourceContainers
+| where type =~ 'microsoft.resources/subscriptions'
+| project subscriptionId=tolower(subscriptionId), name, type=tolower(type), properties
+"""
+
+ADVISOR_ARG_QUERY = """\
+AdvisorResources
+| where type =~ 'microsoft.advisor/recommendations' and properties.category =~ 'Cost'
+| project id, name, type=tolower(type), subscriptionId=tolower(subscriptionId), properties
+"""
 _CHUNK_SIZE = 500
 
 _SCHEDULE_TAG_KEYS = re.compile(
@@ -78,10 +90,49 @@ class AksPoolProfile:
 
 
 @dataclass
+class AdvisorRightSizeInfo:
+    target_resource_id: str
+    recommendation_type: str      # e.g. "Right-size" or "Shutdown"
+    recommended_sku: str = ""     # e.g. "Standard_D2s_v5"
+    current_sku: str = ""
+    summary: str = ""             # e.g. "Right-size to Standard_D2s_v5 (CPU 4% max)"
+    estimated_monthly_saving: float = 0.0
+
+
+@dataclass
+class ActiveReservationInfo:
+    reservation_id: str
+    name: str
+    sku: str
+    region: str
+    quantity: int
+    expiry_date: str              # DD/MM/YYYY or YYYY-MM-DD
+    scope_type: str               # "Shared" or "Single"
+    scope_subscription_id: str = ""
+    remaining_quantity: int = 0
+
+
+@dataclass
+class QuotaFamilyUsage:
+    family_name: str
+    localized_name: str
+    current_value: int
+    limit: int
+
+    @property
+    def available(self) -> int:
+        return max(0, self.limit - self.current_value)
+
+
+@dataclass
 class ScheduleCatalog:
     by_resource_id: Dict[str, VmScheduleInfo] = field(default_factory=dict)
     aks_pools_by_key: Dict[Tuple[str, str, str], AksPoolProfile] = field(default_factory=dict)
     aks_pools: List[AksPoolProfile] = field(default_factory=list)
+    management_groups_by_sub: Dict[str, str] = field(default_factory=dict)
+    advisor_by_resource_id: Dict[str, AdvisorRightSizeInfo] = field(default_factory=dict)
+    reservations: List[ActiveReservationInfo] = field(default_factory=list)
+    quota_by_sub_region_family: Dict[Tuple[str, str, str], QuotaFamilyUsage] = field(default_factory=dict)
 
 
 @dataclass
@@ -246,7 +297,277 @@ def fetch_schedule_catalog(
                 if sub_id and node_rg and pname:
                     catalog.aks_pools_by_key[(sub_id, node_rg, pname.lower())] = prof
 
+    # Query Management Group hierarchy via ResourceContainers
+    try:
+        container_rows = client.query_resource_graph(
+            CONTAINERS_ARG_QUERY,
+            subscriptions=subscriptions if subscriptions else None,
+            api_version=api_version,
+        )
+        for crow in container_rows:
+            if str(crow.get("type") or "").strip().lower() != "microsoft.resources/subscriptions":
+                continue
+            sid = str(crow.get("subscriptionId") or "").strip().lower()
+            cprops = crow.get("properties") if isinstance(crow.get("properties"), dict) else {}
+            chain = cprops.get("managementGroupAncestorsChain")
+            if sid and isinstance(chain, list) and chain:
+                first = chain[0] if isinstance(chain[0], dict) else {}
+                mg_label = str(first.get("displayName") or first.get("name") or "").strip()
+                if mg_label:
+                    catalog.management_groups_by_sub[sid] = mg_label
+    except ArmError as exc:
+        log.debug("Could not query management groups from ResourceContainers: %s", exc)
+
+    # Query Azure Advisor cost/right-sizing recommendations via AdvisorResources
+    try:
+        adv_rows = client.query_resource_graph(
+            ADVISOR_ARG_QUERY,
+            subscriptions=subscriptions if subscriptions else None,
+            api_version=api_version,
+        )
+        for arow in adv_rows:
+            if str(arow.get("type") or "").strip().lower() != "microsoft.advisor/recommendations":
+                continue
+            aprops = arow.get("properties") if isinstance(arow.get("properties"), dict) else {}
+            meta = aprops.get("resourceMetadata") if isinstance(aprops.get("resourceMetadata"), dict) else {}
+            ext = aprops.get("extendedProperties") if isinstance(aprops.get("extendedProperties"), dict) else {}
+            short_desc = aprops.get("shortDescription") if isinstance(aprops.get("shortDescription"), dict) else {}
+            target_rid = str(meta.get("resourceId") or aprops.get("impactedValue") or "").strip().lower()
+            if not target_rid:
+                continue
+            rec_type_raw = str(ext.get("recommendationType") or short_desc.get("problem") or "Right-size").strip()
+            target_sku = str(ext.get("targetSku") or ext.get("recommendedSku") or "").strip()
+            cur_sku = str(ext.get("currentSku") or "").strip()
+            cpu_p95 = str(ext.get("MaxCpuP95") or ext.get("maxCpuP95") or "").strip()
+            try:
+                monthly_save = float(ext.get("savingsAmount") or 0.0)
+            except (TypeError, ValueError):
+                monthly_save = 0.0
+            if monthly_save <= 0:
+                try:
+                    monthly_save = round(float(ext.get("annualSavingsAmount") or 0.0) / 12.0, 2)
+                except (TypeError, ValueError):
+                    monthly_save = 0.0
+
+            if "shutdown" in rec_type_raw.lower() or "shut down" in rec_type_raw.lower() or target_sku.lower() == "shutdown":
+                rec_kind = "Shutdown"
+                cpu_note = f" (CPU P95 {cpu_p95}%)" if cpu_p95 else ""
+                summary = f"Advisor: Shut down idle VM{cpu_note}"
+            elif target_sku:
+                rec_kind = "Right-size"
+                cpu_note = f", CPU P95 {cpu_p95}%" if cpu_p95 else ""
+                summary = f"Advisor: Right-size to {target_sku}{cpu_note}"
+            else:
+                rec_kind = "Optimise"
+                summary = f"Advisor: {rec_type_raw}"
+            catalog.advisor_by_resource_id[target_rid] = AdvisorRightSizeInfo(
+                target_resource_id=target_rid,
+                recommendation_type=rec_kind,
+                recommended_sku=target_sku,
+                current_sku=cur_sku,
+                summary=summary,
+                estimated_monthly_saving=monthly_save,
+            )
+    except ArmError as exc:
+        log.debug("Could not query AdvisorRecommendations: %s", exc)
+
     return catalog
+
+
+def fetch_active_vm_reservations(
+    client: ArmClient,
+    *,
+    api_version: str = "2022-11-01",
+) -> List[ActiveReservationInfo]:
+    """Query active Virtual Machine Reserved Instances visible to the caller."""
+    reservations: List[ActiveReservationInfo] = []
+    try:
+        items = client.list_all("/providers/Microsoft.Capacity/reservations", api_version)
+    except ArmError as exc:
+        log.debug("Could not list Microsoft.Capacity/reservations: %s", exc)
+        return reservations
+
+    for item in items:
+        props = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+        res_type = str(props.get("reservedResourceType") or "").strip().lower()
+        if res_type and res_type != "virtualmachines":
+            continue
+        state = str(props.get("provisioningState") or "").strip().lower()
+        if state and state not in ("succeeded", "active"):
+            continue
+        sku_obj = item.get("sku") if isinstance(item.get("sku"), dict) else {}
+        sku_name = str(sku_obj.get("name") or props.get("skuDescription") or "").strip()
+        if not sku_name:
+            continue
+        loc = str(item.get("location") or "").strip().lower()
+        try:
+            qty = max(1, int(props.get("quantity") or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        raw_exp = str(props.get("expiryDate") or props.get("expiryDateTime") or "").strip()
+        exp_date = raw_exp[:10] if len(raw_exp) >= 10 else raw_exp
+        scope_type = str(props.get("appliedScopeType") or "Shared").strip()
+        scopes = props.get("appliedScopes") if isinstance(props.get("appliedScopes"), list) else []
+        scope_sub = ""
+        if scopes:
+            parts = str(scopes[0] or "").strip("/").split("/")
+            if len(parts) >= 2 and parts[0].lower() == "subscriptions":
+                scope_sub = parts[1].lower()
+        reservations.append(
+            ActiveReservationInfo(
+                reservation_id=str(item.get("id") or ""),
+                name=str(props.get("displayName") or item.get("name") or ""),
+                sku=sku_name,
+                region=loc,
+                quantity=qty,
+                expiry_date=exp_date,
+                scope_type=scope_type,
+                scope_subscription_id=scope_sub,
+                remaining_quantity=qty,
+            )
+        )
+    return reservations
+
+
+def fetch_subscription_compute_quotas(
+    client: ArmClient,
+    sub_region_pairs: Sequence[Tuple[str, str]],
+    *,
+    api_version: str = "2024-07-01",
+) -> Dict[Tuple[str, str, str], QuotaFamilyUsage]:
+    """Query regional Microsoft.Compute vCPU family usages/limits for ``(subscription_id, region)`` pairs."""
+    quota_map: Dict[Tuple[str, str, str], QuotaFamilyUsage] = {}
+    seen_pairs = list(dict.fromkeys((s.lower(), r.lower()) for s, r in sub_region_pairs if s and r))[:12]
+    for sub_id, region in seen_pairs:
+        path = f"/subscriptions/{sub_id}/providers/Microsoft.Compute/locations/{region}/usages"
+        try:
+            items = client.list_all(path, api_version)
+        except ArmError as exc:
+            log.debug("Could not read Compute quota usages for %s in %s: %s", sub_id, region, exc)
+            continue
+        for item in items:
+            name_obj = item.get("name") if isinstance(item.get("name"), dict) else {}
+            fam_val = str(name_obj.get("value") or "").strip()
+            loc_val = str(name_obj.get("localizedValue") or fam_val).strip()
+            if not fam_val:
+                continue
+            try:
+                cur_val = int(item.get("currentValue") or 0)
+                lim_val = int(item.get("limit") or 0)
+            except (TypeError, ValueError):
+                continue
+            quota_map[(sub_id, region, fam_val.lower())] = QuotaFamilyUsage(
+                family_name=fam_val,
+                localized_name=loc_val,
+                current_value=cur_val,
+                limit=lim_val,
+            )
+    return quota_map
+
+
+_COST_TAG_PRIORITY = (
+    "costcenter",
+    "costcentre",
+    "cost-center",
+    "cost_center",
+    "billingcode",
+    "department",
+    "businessunit",
+    "business-unit",
+    "service",
+    "application",
+    "app",
+    "workload",
+    "project",
+    "owner",
+    "team",
+    "environment",
+    "env",
+)
+
+
+def extract_cost_allocation_tag(tags: Optional[Mapping[str, Any]]) -> str:
+    """Return the most informative cost-centre, business-unit, service or environment tag on a VM."""
+    if not isinstance(tags, Mapping) or not tags:
+        return "Untagged"
+    by_lower: Dict[str, Tuple[str, str]] = {}
+    for k, v in tags.items():
+        if k is not None and v is not None:
+            ks = str(k).strip()
+            vs = str(v).strip()
+            if ks and vs:
+                by_lower[ks.lower()] = (ks, vs)
+    for pref in _COST_TAG_PRIORITY:
+        if pref in by_lower:
+            orig_k, val = by_lower[pref]
+            return f"{orig_k}: {val[:28]}"
+    return "Untagged"
+
+
+def match_reservation_for_vm(
+    reservations: Sequence[ActiveReservationInfo],
+    *,
+    subscription_id: str,
+    region: str,
+    sku: str,
+    parent_sku: str,
+    instance_count: int,
+    ri_purchase_blocked: bool,
+) -> Tuple[str, str]:
+    """Match a VM/VMSS against active VM reservations and return ``(ri_status, ri_expiry_date)``."""
+    sub_l = (subscription_id or "").strip().lower()
+    reg_l = (region or "").strip().lower()
+    sku_candidates = {s.lower() for s in (sku, parent_sku) if s}
+
+    # Check single-subscription RIs first, then shared RIs
+    for pass_shared in (False, True):
+        for res in reservations:
+            if res.remaining_quantity <= 0:
+                continue
+            is_shared = res.scope_type.lower() == "shared" or not res.scope_subscription_id
+            if is_shared != pass_shared:
+                continue
+            if not is_shared and res.scope_subscription_id != sub_l:
+                continue
+            if res.region and res.region != reg_l:
+                continue
+            if res.sku.lower() not in sku_candidates:
+                continue
+            covered = min(max(1, instance_count), res.remaining_quantity)
+            res.remaining_quantity -= covered
+            exp_label = res.expiry_date or "active"
+            if covered >= max(1, instance_count):
+                return f"RI Covered (exp {exp_label})", res.expiry_date
+            return f"Partial RI ({covered}/{instance_count}, exp {exp_label})", res.expiry_date
+
+    if ri_purchase_blocked:
+        return "No RI (RI renewal blocked 01/07/2026)", ""
+    return "No RI (PAYG / SP)", ""
+
+
+def evaluate_quota_headroom(
+    quota_map: Mapping[Tuple[str, str, str], QuotaFamilyUsage],
+    *,
+    subscription_id: str,
+    region: str,
+    target_quota_family: str,
+    needed_vcpus: int,
+) -> str:
+    """Return a concise regional vCPU quota readiness status for the target modern SKU family."""
+    sub_l = (subscription_id or "").strip().lower()
+    reg_l = (region or "").strip().lower()
+    fam_l = (target_quota_family or "").strip().lower()
+    if not sub_l or not reg_l or not fam_l:
+        return ""
+    usage = quota_map.get((sub_l, reg_l, fam_l))
+    if usage is None:
+        return ""
+    avail = usage.available
+    if usage.limit == 0:
+        return f"Quota 0/{usage.limit} ({usage.family_name})"
+    if avail >= needed_vcpus:
+        return f"Quota OK ({avail} free / {usage.limit} limit)"
+    return f"Quota Increase Needed (needs {needed_vcpus}, {avail} free / {usage.limit})"
 
 
 def fetch_vm_schedules(

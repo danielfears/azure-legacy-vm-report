@@ -91,6 +91,18 @@ By default (`--cost-source auto`), the tool queries **both** **Azure Cost Manage
    - **AKS Cluster Autoscaler & Azure Monitor Autoscale (`microsoft.insights/autoscalesettings`):** surfaces `AKS Autoscale (min..max)` and `Autoscale On/Off (min..max)`.
    - When Cost Management is unavailable for a subscription (or when you select **Retail Rate × Inferred Schedule Hours** in the HTML report), VMs with active start/stop runbook tags (`~260h/mo`), daily auto-shutdown schedules (`~365h/mo`), or ephemeral CI/image-builder tags (`~20h/mo`) are costed using their inferred duty cycle rather than blindly assuming 730h/mo (24×7).
 
+## Post-migration target SKU cost, RI coverage, Advisor right-sizing & quota readiness
+
+Beyond quantifying the February 2027 price-hike impact, the tool automatically evaluates the **cost and technical readiness of migrating** off legacy SKUs:
+
+- **Post-migration target SKU running cost ("Stay vs Modernise"):** maps every legacy `v1`/`v2`/`v3` size to its concrete 1:1 **compatibility bridge (`v5` / `Bsv2` / `Lsv3`)** and **strategic target (`v6` / `v7` / `Lsv4`)** SKU, quotes live target PAYG and **3-Year RI / Savings Plan** rates, and applies the VM's observed duty cycle (billed hours) and negotiated EA/MCA discount ratio (`ActualCost / Retail`). Shows side-by-side **Current / mo**, **Feb 2027 "Do Nothing" / mo**, **Target v5 PAYG / mo**, **Monthly Savings vs Feb 2027**, and **Target v5 + 3-Year RI/SP / mo**.
+- **Migration Wave Planner & CLI hints:** groups the estate into **Wave 1: Drop-in v5 Resize (SCSI compatible)** (`az vm resize` / `az vmss update`), **Wave 2: Managed Pool Rolling Replace** (`az aks nodepool add`), and **Wave 3: Gen2 / NVMe or Specialised Rebuild (`v6`/`v7`)**.
+- **Live Reserved Instance (RI) coverage & expiry detection:** queries `Microsoft.Capacity/reservations` to flag VMs currently shielded by an active RI (`RI Covered (exp YYYY-MM-DD)`) vs VMs exposed on PAYG where new `v1`/`v2`/`Dv3`/`Ev3` RI purchases and renewals ended on **01/07/2026**.
+- **Azure Advisor Right-Size + Modernise double-dip:** queries `AdvisorResources` via Azure Resource Graph to surface under-utilised VMs (`Advisor: Right-size to ...`) so teams can right-size and modernise in a single maintenance window.
+- **Regional vCPU family quota pre-flight:** checks `Microsoft.Compute/locations/*/usages` for target `v5` vCPU family headroom (`Quota OK` vs `Quota Increase Needed`).
+- **Management Group & Cost-Allocation Tag roll-up:** joins `ResourceContainers` to group subscriptions by Management Group hierarchy and surfaces cost-allocation tags (`CostCentre`, `Service`, `Owner`, `Environment`).
+- **Optional modern regional-hike scope (`--include-regional-skus`):** includes `v4`, `v5`, and `v6` VMs when scanning estates in the 7 EU/APAC regional-hike regions (`northeurope`, `westeurope`, `francecentral`, `francesouth`, `norwayeast`, `norwaywest`, `southeastasia`).
+
 ## Output formats
 
 `--format` accepts `console` (default), `csv`, `json`, `md`, `html` or `all`. Files are written to

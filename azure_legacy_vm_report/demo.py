@@ -85,8 +85,18 @@ class DemoTransport(Transport):
             query_str = str(req_json.get("query") or "").lower()
             if "microsoft.devtestlab/schedules" in query_str:
                 return _json_response({"data": [] if is_alpha else _beta_schedules()})
+            if "resourcecontainers" in query_str:
+                return _json_response({"data": _demo_management_groups(is_alpha)})
+            if "advisorresources" in query_str:
+                return _json_response({"data": _demo_advisor_recommendations(is_alpha)})
             rows = self._alpha_vms if is_alpha else self._beta_vms
             return _json_response({"data": rows})
+
+        if path == "/providers/Microsoft.Capacity/reservations" and method == "GET":
+            return _json_response({"value": _demo_reservations() if is_alpha else []})
+
+        if "/providers/Microsoft.Compute/locations/" in path and path.endswith("/usages") and method == "GET":
+            return _json_response({"value": _demo_compute_quotas()})
 
         if path.endswith("/providers/Microsoft.CostManagement/query") and method == "POST":
             req_json = json.loads(body.decode("utf-8")) if body else {}
@@ -272,4 +282,121 @@ def _demo_cost_response(path: str, req_json: Mapping[str, Any]) -> Dict[str, Any
             "rows": rows,
         }
     }
+
+
+def _demo_management_groups(is_alpha: bool) -> List[Dict[str, Any]]:
+    if is_alpha:
+        return [
+            {
+                "type": "microsoft.resources/subscriptions",
+                "subscriptionId": SUB_CORE,
+                "name": "CONTOSO-CORE-INFRA-PROD-001",
+                "properties": {
+                    "managementGroupAncestorsChain": [
+                        {"name": "mg-prod-core", "displayName": "Production Landing Zones"}
+                    ]
+                },
+            },
+            {
+                "type": "microsoft.resources/subscriptions",
+                "subscriptionId": SUB_DATA,
+                "name": "CONTOSO-DATA-PLATFORM-PROD-002",
+                "properties": {
+                    "managementGroupAncestorsChain": [
+                        {"name": "mg-prod-data", "displayName": "Data & Analytics Platform"}
+                    ]
+                },
+            },
+            {
+                "type": "microsoft.resources/subscriptions",
+                "subscriptionId": SUB_SHARED,
+                "name": "CONTOSO-SHARED-SERVICES-PROD-001",
+                "properties": {
+                    "managementGroupAncestorsChain": [
+                        {"name": "mg-platform-shared", "displayName": "Shared Platform Services"}
+                    ]
+                },
+            },
+        ]
+    return [
+        {
+            "type": "microsoft.resources/subscriptions",
+            "subscriptionId": SUB_DEV,
+            "name": "CONTOSO-WORKLOAD-SANDBOX-DEV-001",
+            "properties": {
+                "managementGroupAncestorsChain": [
+                    {"name": "mg-nonprod", "displayName": "Non-Production Sandboxes"}
+                ]
+            },
+        }
+    ]
+
+
+def _demo_advisor_recommendations(is_alpha: bool) -> List[Dict[str, Any]]:
+    if not is_alpha:
+        return []
+    return [
+        {
+            "type": "microsoft.advisor/recommendations",
+            "name": "adv-rightsize-erp-01",
+            "subscriptionId": SUB_CORE,
+            "properties": {
+                "category": "Cost",
+                "resourceMetadata": {
+                    "resourceId": f"/subscriptions/{SUB_CORE}/resourceGroups/rg-app-prd-uks-001/providers/Microsoft.Compute/virtualMachines/vm-erp-app-01"
+                },
+                "extendedProperties": {
+                    "recommendationType": "Right-size",
+                    "currentSku": "Standard_D4_v2",
+                    "targetSku": "Standard_D2s_v5",
+                    "MaxCpuP95": "4",
+                    "savingsAmount": "165.00",
+                },
+            },
+        }
+    ]
+
+
+def _demo_reservations() -> List[Dict[str, Any]]:
+    return [
+        {
+            "id": "/providers/Microsoft.Capacity/reservationOrders/ro-1/reservations/res-1",
+            "name": "ri-memcache-e16sv3-uks",
+            "location": "uksouth",
+            "sku": {"name": "Standard_E16s_v3"},
+            "properties": {
+                "reservedResourceType": "VirtualMachines",
+                "provisioningState": "Succeeded",
+                "quantity": 1,
+                "expiryDate": "2027-08-14",
+                "appliedScopeType": "Single",
+                "appliedScopes": [f"/subscriptions/{SUB_DATA}"],
+            },
+        }
+    ]
+
+
+def _demo_compute_quotas() -> List[Dict[str, Any]]:
+    return [
+        {
+            "name": {"value": "standardDSv5Family", "localizedValue": "Standard DSv5 Family vCPUs"},
+            "currentValue": 48,
+            "limit": 350,
+        },
+        {
+            "name": {"value": "standardDlsv5Family", "localizedValue": "Standard Dlsv5 Family vCPUs"},
+            "currentValue": 16,
+            "limit": 250,
+        },
+        {
+            "name": {"value": "standardESv5Family", "localizedValue": "Standard ESv5 Family vCPUs"},
+            "currentValue": 32,
+            "limit": 200,
+        },
+        {
+            "name": {"value": "standardBSv2Family", "localizedValue": "Standard BSv2 Family vCPUs"},
+            "currentValue": 8,
+            "limit": 100,
+        },
+    ]
 

@@ -123,3 +123,16 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(p_custom.hike_pct_for(v1_sku, "uksouth")[0], 30.0)
         self.assertEqual(p_custom.hike_pct_for(v2_sku, "uksouth")[0], 25.0)
         self.assertEqual(p_custom.hike_pct_for(v3_sku, "uksouth")[0], 15.0)
+
+    def test_target_sku_pricing_and_3yr_ri_rates(self) -> None:
+        client = PricingClient(FakePricingTransport([]), currency="GBP", offline=True)
+        t_uks = client.quote_target_sku("Standard_D16ls_v5", 16, "uksouth", os_type="Linux")
+        self.assertAlmostEqual(t_uks.payg_hourly_rate, 0.5792, places=4)
+        self.assertAlmostEqual(t_uks.feb_payg_hourly_rate, 0.5792, places=4)
+        self.assertLess(t_uks.ri_3y_hourly_rate, t_uks.feb_payg_hourly_rate * 0.5)
+
+        # In North Europe (+17% regional hike), v5 target gets +17% in Feb 2027, whereas v7 is exempt
+        t_neu = client.quote_target_sku("Standard_D4s_v5", 4, "northeurope", os_type="Linux")
+        self.assertAlmostEqual(t_neu.feb_payg_hourly_rate, round(t_neu.payg_hourly_rate * 1.17, 4), places=4)
+        t_v7_neu = client.quote_target_sku("Standard_D4s_v7", 4, "northeurope", os_type="Linux")
+        self.assertAlmostEqual(t_v7_neu.feb_payg_hourly_rate, t_v7_neu.payg_hourly_rate, places=4)

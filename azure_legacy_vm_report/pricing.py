@@ -82,6 +82,26 @@ _SERIES_PER_VCPU_GBP: Dict[str, Tuple[float, float]] = {
     "NVv3": (0.0950, 0.1290),
     "NCv3": (0.3800, 0.4140),
     "NCasT4_v3": (0.0820, 0.1160),
+    # Modern v4/v5/v6 target & regional-hike series
+    "Dv4": (0.0427, 0.0766),
+    "Dsv4": (0.0427, 0.0766),
+    "Ev4": (0.0574, 0.0913),
+    "Esv4": (0.0574, 0.0913),
+    "Dv5": (0.0427, 0.0766),
+    "Dsv5": (0.0427, 0.0766),
+    "Dlsv5": (0.0362, 0.0701),
+    "Ev5": (0.0574, 0.0913),
+    "Esv5": (0.0574, 0.0913),
+    "Dv6": (0.0448, 0.0787),
+    "Dsv6": (0.0448, 0.0787),
+    "Dlsv6": (0.0378, 0.0717),
+    "Ev6": (0.0602, 0.0941),
+    "Esv6": (0.0602, 0.0941),
+    "Fsv6": (0.0378, 0.0717),
+    "Falsv6": (0.0378, 0.0717),
+    "Lsv4": (0.0595, 0.0935),
+    "DCasv5": (0.0480, 0.0820),
+    "DCasv6": (0.0500, 0.0840),
 }
 
 # Exact verified UK South hourly rates in GBP (and USD via 1.36215 conversion when needed)
@@ -189,6 +209,80 @@ _EXACT_UKS_GBP: Dict[str, Tuple[float, float]] = {
     "Standard_L48s_v2": (2.9760, 4.6080),
     "Standard_L64s_v2": (3.9680, 6.1440),
     "Standard_L80s_v2": (4.9600, 7.6800),
+    # Target v5 & v6 SKUs (UK South GBP/hr: Linux, Windows)
+    "Standard_B2ts_v2": (0.0084, 0.0144),
+    "Standard_B2ls_v2": (0.0168, 0.0236),
+    "Standard_B2s_v2": (0.0336, 0.0404),
+    "Standard_B4s_v2": (0.0672, 0.0808),
+    "Standard_B8s_v2": (0.1344, 0.1616),
+    "Standard_B16s_v2": (0.2688, 0.3232),
+    "Standard_B32s_v2": (0.5376, 0.6464),
+    "Standard_D2s_v5": (0.0854, 0.1531),
+    "Standard_D4s_v5": (0.1708, 0.3063),
+    "Standard_D8s_v5": (0.3416, 0.6126),
+    "Standard_D16s_v5": (0.6832, 1.2252),
+    "Standard_D32s_v5": (1.3664, 2.4504),
+    "Standard_D48s_v5": (2.0496, 3.6756),
+    "Standard_D64s_v5": (2.7328, 4.9008),
+    "Standard_D96s_v5": (4.0992, 7.3512),
+    "Standard_D2ls_v5": (0.0724, 0.1402),
+    "Standard_D4ls_v5": (0.1448, 0.2804),
+    "Standard_D8ls_v5": (0.2896, 0.5608),
+    "Standard_D16ls_v5": (0.5792, 1.1216),
+    "Standard_D32ls_v5": (1.1584, 2.2432),
+    "Standard_D48ls_v5": (1.7376, 3.3648),
+    "Standard_D64ls_v5": (2.3168, 4.4864),
+    "Standard_D96ls_v5": (3.4752, 6.7296),
+    "Standard_D2s_v6": (0.0896, 0.1574),
+    "Standard_D4s_v6": (0.1792, 0.3148),
+    "Standard_D8s_v6": (0.3584, 0.6296),
+    "Standard_D16s_v6": (0.7168, 1.2592),
+    "Standard_D32s_v6": (1.4336, 2.5184),
+    "Standard_D48s_v6": (2.1504, 3.7776),
+    "Standard_D64s_v6": (2.8672, 5.0368),
+    "Standard_D96s_v6": (4.3008, 7.5552),
+    "Standard_D2ls_v6": (0.0756, 0.1434),
+    "Standard_D4ls_v6": (0.1512, 0.2868),
+    "Standard_D8ls_v6": (0.3024, 0.5736),
+    "Standard_D16ls_v6": (0.6048, 1.1472),
+    "Standard_D32ls_v6": (1.2096, 2.2944),
+    "Standard_F2als_v6": (0.0756, 0.1434),
+    "Standard_F4als_v6": (0.1512, 0.2868),
+    "Standard_F8als_v6": (0.3024, 0.5736),
+    "Standard_F16als_v6": (0.6048, 1.1472),
+    "Standard_F32als_v6": (1.2096, 2.2944),
+    "Standard_F48als_v6": (1.8144, 3.4416),
+    "Standard_F64als_v6": (2.4192, 4.5888),
+    "Standard_E2s_v5": (0.1147, 0.1823),
+    "Standard_E4s_v5": (0.2297, 0.3650),
+    "Standard_E8s_v5": (0.4594, 0.7300),
+    "Standard_E16s_v5": (0.9188, 1.4600),
+    "Standard_E20s_v5": (1.1485, 1.8250),
+    "Standard_E32s_v5": (1.8376, 2.9200),
+    "Standard_E48s_v5": (2.7564, 4.3800),
+    "Standard_E64s_v5": (3.6752, 5.8400),
+    "Standard_E96s_v5": (5.5128, 8.7600),
+    "Standard_E2s_v6": (0.1204, 0.1882),
+    "Standard_E4s_v6": (0.2408, 0.3764),
+    "Standard_E8s_v6": (0.4816, 0.7528),
+    "Standard_E16s_v6": (0.9632, 1.5056),
+    "Standard_E20s_v6": (1.2040, 1.8820),
+    "Standard_E32s_v6": (1.9264, 3.0112),
+    "Standard_E48s_v6": (2.8896, 4.5168),
+    "Standard_E64s_v6": (3.8528, 6.0224),
+    "Standard_E96s_v6": (5.7792, 9.0336),
+    "Standard_L8s_v3": (0.4640, 0.7360),
+    "Standard_L16s_v3": (0.9280, 1.4720),
+    "Standard_L32s_v3": (1.8560, 2.9440),
+    "Standard_L48s_v3": (2.7840, 4.4160),
+    "Standard_L64s_v3": (3.7120, 5.8880),
+    "Standard_L80s_v3": (4.6400, 7.3600),
+    "Standard_L8s_v4": (0.4760, 0.7480),
+    "Standard_L16s_v4": (0.9520, 1.4960),
+    "Standard_L32s_v4": (1.9040, 2.9920),
+    "Standard_L48s_v4": (2.8560, 4.4880),
+    "Standard_L64s_v4": (3.8080, 5.9840),
+    "Standard_L80s_v4": (4.7600, 7.4800),
 }
 
 _REGION_MULTIPLIER: Dict[str, float] = {
@@ -280,6 +374,16 @@ class PriceQuote:
     source: str  # "retail-api" or "fallback-table"
 
 
+@dataclass(frozen=True)
+class TargetPriceQuote:
+    sku: str
+    payg_hourly_rate: float
+    feb_payg_hourly_rate: float
+    ri_3y_hourly_rate: float
+    currency: str
+    source: str  # "retail-api" or "fallback-table"
+
+
 def uses_hybrid_benefit(os_type: str, license_type: str) -> bool:
     """True when Azure Hybrid Benefit (BYOL) waives the OS licence surcharge."""
     lic = (license_type or "").strip().upper()
@@ -358,6 +462,64 @@ class PricingClient:
             meter_name=f"{sku_info.parent_sku} ({meter_os})",
             pricing_model=model_label,
             source="fallback-table",
+        )
+
+    def quote_target_sku(
+        self,
+        arm_sku: str,
+        fallback_vcpus: int,
+        region: str,
+        *,
+        os_type: str = "Linux",
+        license_type: str = "",
+        priority: str = "Regular",
+    ) -> TargetPriceQuote:
+        """Quote PAYG, Feb 2027 PAYG, and 3-Year RI hourly rates for a target modern SKU (v5/v6/v7)."""
+        reg = (region or "uksouth").strip().lower()
+        meter_os = effective_os_meter(os_type, license_type)
+        prio = (priority or "Regular").strip().lower()
+        sku_clean = (arm_sku or "Standard_D2s_v5").strip()
+
+        payg_rate: Optional[float] = None
+        linux_rate: Optional[float] = None
+        cur = self.currency
+        source = "fallback-table"
+
+        if not self._offline and sku_clean:
+            items = self._fetch_items(reg, sku_clean)
+            matched = _select_meter(items, meter_os=meter_os, priority=prio)
+            if matched is not None:
+                payg_rate, _, cur = matched
+                linux_matched = _select_meter(items, meter_os="Linux", priority=prio)
+                linux_rate = linux_matched[0] if linux_matched is not None else payg_rate
+                source = "retail-api"
+
+        if payg_rate is None:
+            payg_rate = _fallback_arm_sku_rate(
+                sku_clean, fallback_vcpus, reg, meter_os=meter_os, priority=prio, currency=self.currency
+            )
+            linux_rate = _fallback_arm_sku_rate(
+                sku_clean, fallback_vcpus, reg, meter_os="Linux", priority=prio, currency=self.currency
+            )
+
+        assert linux_rate is not None
+        reg_pct = 0.0 if "_v7" in sku_clean.lower() else REGIONAL_FEB_2027_HIKES.get(reg, 0.0)
+        mult = 1.0 + (reg_pct / 100.0)
+        feb_payg = round(payg_rate * mult, 4)
+        feb_linux = linux_rate * mult
+        if prio in ("spot", "low"):
+            ri_3y = feb_payg
+        else:
+            os_surcharge = max(0.0, feb_payg - feb_linux)
+            ri_3y = round((feb_linux * 0.42) + os_surcharge, 4)
+
+        return TargetPriceQuote(
+            sku=sku_clean,
+            payg_hourly_rate=payg_rate,
+            feb_payg_hourly_rate=feb_payg,
+            ri_3y_hourly_rate=ri_3y,
+            currency=cur,
+            source=source,
         )
 
     def _fetch_items(self, region: str, arm_sku: str) -> List[Dict[str, Any]]:
@@ -457,3 +619,46 @@ def _fallback_hourly_rate(
     cur_mult = _CURRENCY_FROM_GBP.get(currency.upper(), 1.0)
     prio_mult = 0.25 if priority == "spot" else (0.30 if priority == "low" else 1.0)
     return round(base_gbp * reg_mult * cur_mult * prio_mult, 4)
+
+
+def _fallback_arm_sku_rate(
+    arm_sku: str,
+    fallback_vcpus: int,
+    region: str,
+    *,
+    meter_os: str,
+    priority: str,
+    currency: str,
+) -> float:
+    want_windows = meter_os == "Windows"
+    exact = _EXACT_UKS_GBP.get(arm_sku)
+    if exact is not None:
+        base_gbp = exact[1] if want_windows else exact[0]
+    else:
+        up = arm_sku.upper()
+        if "LS_V5" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Dlsv5"]
+        elif "LS_V6" in up or "ALS_V6" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Falsv6"]
+        elif "_V6" in up and "_E" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Esv6"]
+        elif "_V5" in up and "_E" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Esv5"]
+        elif "_V6" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Dsv6"]
+        elif "BS_V2" in up or "_B" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Bsv2"]
+        elif "LS_V4" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Lsv4"]
+        elif "LS_V3" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Lsv3"]
+        else:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Dsv5"]
+        rate_per_vcpu = per_vcpu[1] if want_windows else per_vcpu[0]
+        base_gbp = rate_per_vcpu * max(2, fallback_vcpus)
+
+    reg_mult = _REGION_MULTIPLIER.get(region, 1.0)
+    cur_mult = _CURRENCY_FROM_GBP.get(currency.upper(), 1.0)
+    prio_mult = 0.25 if priority == "spot" else (0.30 if priority == "low" else 1.0)
+    return round(base_gbp * reg_mult * cur_mult * prio_mult, 4)
+

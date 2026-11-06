@@ -175,5 +175,46 @@ class CollectAndReportTests(unittest.TestCase):
         self.assertAlmostEqual(d4s_ret.inferred_hours_per_month, 260.0, places=1)
         self.assertLess(d4s_ret.schedule_adjusted_monthly, d4s_ret.retail_active_monthly)
 
+    def test_target_migration_costs_waves_mg_advisor_ri_and_quota(self) -> None:
+        from azure_legacy_vm_report.demo import TENANT_ALPHA
+        transport = DemoTransport()
+        pricing = PricingClient(transport, currency="GBP", offline=True)
+        policy = HikePolicy()
+        as_of = datetime(2026, 10, 29, 16, 0, tzinfo=UTC)
+
+        data_alpha = collect_tenant(
+            TenantSpec(tenant_id=TENANT_ALPHA),
+            tokens=DemoTokens(),
+            transport=transport,
+            endpoint="https://management.azure.com",
+            pricing=pricing,
+            policy=policy,
+            options=CollectOptions(cost_source=COST_SOURCE_AUTO, as_of=as_of),
+        )
+        by_name = {r.name: r for r in data_alpha.records}
+
+        # ERP D4_v2 VM: migrates to Standard_D8s_v5 at a huge saving vs Feb 2027 (+25% D4_v2),
+        # has Management Group, Advisor right-sizing recommendation, Quota OK, and Wave 1 resize CLI hint
+        erp = by_name["vm-erp-app-01"]
+        self.assertEqual(erp.management_group, "Production Landing Zones")
+        self.assertEqual(erp.target_v5_sku, "Standard_D8s_v5")
+        self.assertLess(erp.target_v5_monthly, erp.feb_monthly)
+        self.assertGreater(erp.target_v5_savings_vs_feb, 100.0)
+        self.assertLess(erp.target_v5_3yr_ri_monthly, erp.target_v5_monthly)
+        self.assertIn("Advisor: Right-size to Standard_D2s_v5", erp.advisor_recommendation)
+        self.assertIn("Quota OK", erp.quota_status)
+        self.assertIn("Wave 1", erp.migration_wave)
+        self.assertIn("az vm resize", erp.migration_cli_hint)
+
+        # AKS systempool VMSS: classified into Wave 2 with az aks nodepool add command
+        aks = by_name["aks-systempool-vmss"]
+        self.assertIn("Wave 2", aks.migration_wave)
+        self.assertIn("az aks nodepool add", aks.migration_cli_hint)
+
+        # Memcache E16s_v3 VM in uksouth is matched to the active Single-subscription RI
+        mem1 = by_name["vm-memcache-01"]
+        self.assertIn("RI Covered (exp 2027-08-14)", mem1.ri_status)
+        self.assertEqual(mem1.ri_expiry_date, "2027-08-14")
+
 
 

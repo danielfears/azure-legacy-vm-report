@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from .costmgmt import ActualVmUsage, VmScheduleInfo
+from .costmgmt import (
+    ActualVmUsage,
+    AdvisorRightSizeInfo,
+    VmScheduleInfo,
+)
 from .pricing import (
     DEFAULT_HOURS_PER_MONTH,
     REGIONAL_FEB_2027_HIKES,
     HikePolicy,
     PriceQuote,
+    TargetPriceQuote,
 )
 from .skus import SkuInfo
+
+WAVE_1_RESIZE = "Wave 1: Drop-in v5 Resize (SCSI)"
+WAVE_2_POOL = "Wave 2: Managed Pool Replace (AKS/PaaS)"
+WAVE_3_REBUILD = "Wave 3: Gen2 / NVMe or Specialised Rebuild"
 
 TYPE_VM = "VirtualMachine"
 TYPE_VMSS = "VirtualMachineScaleSet"
@@ -125,6 +134,25 @@ class LegacyVmRecord:
     recommended_v5: str
     recommended_current: str
     disk_controller_note: str
+    management_group: str = "Tenant Root"
+    cost_allocation_tag: str = "Untagged"
+    target_v5_sku: str = ""
+    target_v5_hourly_rate: float = 0.0
+    target_v5_monthly: float = 0.0
+    target_v5_savings_vs_feb: float = 0.0
+    target_v5_3yr_ri_monthly: float = 0.0
+    target_current_sku: str = ""
+    target_current_hourly_rate: float = 0.0
+    target_current_monthly: float = 0.0
+    target_current_savings_vs_feb: float = 0.0
+    target_current_3yr_ri_monthly: float = 0.0
+    ri_status: str = ""
+    ri_expiry_date: str = ""
+    advisor_recommendation: str = ""
+    advisor_monthly_saving: float = 0.0
+    quota_status: str = ""
+    migration_wave: str = ""
+    migration_cli_hint: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -136,6 +164,8 @@ class LegacyVmRecord:
             "tenant_name": self.tenant_name,
             "subscription_id": self.subscription_id,
             "subscription_name": self.subscription_name,
+            "management_group": self.management_group,
+            "cost_allocation_tag": self.cost_allocation_tag,
             "resource_group": self.resource_group,
             "region": self.region,
             "sku": self.sku,
@@ -194,6 +224,23 @@ class LegacyVmRecord:
             "retirement_date": self.retirement_date,
             "recommended_v5": self.recommended_v5,
             "recommended_current": self.recommended_current,
+            "target_v5_sku": self.target_v5_sku,
+            "target_v5_hourly_rate": round(self.target_v5_hourly_rate, 4),
+            "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
+            "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+            "target_current_sku": self.target_current_sku,
+            "target_current_hourly_rate": round(self.target_current_hourly_rate, 4),
+            "target_current_monthly": round(self.target_current_monthly, 2),
+            "target_current_savings_vs_feb": round(self.target_current_savings_vs_feb, 2),
+            "target_current_3yr_ri_monthly": round(self.target_current_3yr_ri_monthly, 2),
+            "ri_status": self.ri_status,
+            "ri_expiry_date": self.ri_expiry_date,
+            "advisor_recommendation": self.advisor_recommendation,
+            "advisor_monthly_saving": round(self.advisor_monthly_saving, 2),
+            "quota_status": self.quota_status,
+            "migration_wave": self.migration_wave,
+            "migration_cli_hint": self.migration_cli_hint,
             "disk_controller_note": self.disk_controller_note,
         }
 
@@ -204,6 +251,56 @@ def _format_schedule(sched: Optional[VmScheduleInfo]) -> str:
     if sched.daily_time:
         return f"{sched.status} ({sched.daily_time})"
     return sched.status
+
+
+def classify_migration_wave(
+    *,
+    deployment_kind: str,
+    resource_type: str,
+    name: str,
+    resource_group: str,
+    sku_info: SkuInfo,
+) -> Tuple[str, str]:
+    """Return ``(migration_wave, migration_cli_hint)`` for a legacy deployment."""
+    kind = (deployment_kind or "").strip()
+    rg = (resource_group or "<rg>").strip()
+    rname = (name or "<name>").strip()
+    v5_sku = sku_info.target_v5_sku or "Standard_D2s_v5"
+    cur_sku = sku_info.target_current_sku or "Standard_D2s_v6"
+
+    if sku_info.series in ("NP", "HC", "HB", "HBv2", "H", "NC", "ND", "NV", "NVv3", "NCv3", "DCs", "DCsv2", "Av1", "Basic_A"):
+        return (
+            WAVE_3_REBUILD,
+            f"Rebuild on Gen2 image (NVMe + MANA) targeting {cur_sku} or {v5_sku}",
+        )
+
+    if (
+        "AKS Node Pool" in kind
+        or kind in ("Databricks Node", "OpenShift / ARO Node", "Batch Pool", "ML Compute", "Ephemeral / CI Job VM")
+    ):
+        if "AKS Node Pool" in kind:
+            cluster_hint = "<cluster>"
+            if "(" in kind and "/" in kind:
+                cluster_hint = kind.split("(", 1)[1].split("/", 1)[0].strip()
+            return (
+                WAVE_2_POOL,
+                f"az aks nodepool add --cluster-name {cluster_hint} -g {rg} -n v5pool --node-vm-size {v5_sku}",
+            )
+        return (
+            WAVE_2_POOL,
+            f"Rolling-replace managed pool nodes onto {v5_sku} (or Gen2/NVMe {cur_sku})",
+        )
+
+    if resource_type == TYPE_VMSS:
+        return (
+            WAVE_1_RESIZE,
+            f"az vmss update -g {rg} -n {rname} --set sku.name={v5_sku}",
+        )
+
+    return (
+        WAVE_1_RESIZE,
+        f"az vm resize -g {rg} -n {rname} --size {v5_sku}",
+    )
 
 
 def build_legacy_record(
@@ -233,6 +330,14 @@ def build_legacy_record(
     deployment_kind: str = "",
     schedule_summary: str = "",
     inferred_hours_per_month: Optional[float] = None,
+    target_v5_quote: Optional[TargetPriceQuote] = None,
+    target_current_quote: Optional[TargetPriceQuote] = None,
+    management_group: str = "Tenant Root",
+    cost_allocation_tag: str = "Untagged",
+    ri_status: str = "",
+    ri_expiry_date: str = "",
+    advisor_info: Optional[AdvisorRightSizeInfo] = None,
+    quota_status: str = "",
 ) -> LegacyVmRecord:
     billed_now = is_power_state_billed(power_state) and instance_count > 0
     active_for_cost = billed_now or (include_deallocated_cost and instance_count > 0)
@@ -288,6 +393,22 @@ def build_legacy_record(
     yr_delta = round(mo_delta * 12.0, 2)
     prov_delta = round(prov_feb - prov_current, 2)
 
+    # Calculate post-migration target running costs (preserving actual duty cycle & negotiated discount ratio)
+    base_hr = quote.hourly_rate if quote.hourly_rate > 0 else 1.0
+    v5_sku = target_v5_quote.sku if target_v5_quote else sku_info.target_v5_sku
+    v5_hr = target_v5_quote.feb_payg_hourly_rate if target_v5_quote else quote.hourly_rate
+    v5_ri_hr = target_v5_quote.ri_3y_hourly_rate if target_v5_quote else round(v5_hr * 0.55, 4)
+    v5_mo = round(current_mo * (v5_hr / base_hr), 2) if quote.hourly_rate > 0 else current_mo
+    v5_save_feb = round(feb_mo - v5_mo, 2)
+    v5_ri_mo = round(current_mo * (v5_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(v5_mo * 0.55, 2)
+
+    cur_sku = target_current_quote.sku if target_current_quote else sku_info.target_current_sku
+    cur_hr = target_current_quote.feb_payg_hourly_rate if target_current_quote else round(v5_hr * 1.04, 4)
+    cur_ri_hr = target_current_quote.ri_3y_hourly_rate if target_current_quote else round(cur_hr * 0.55, 4)
+    cur_mo = round(current_mo * (cur_hr / base_hr), 2) if quote.hourly_rate > 0 else current_mo
+    cur_save_feb = round(feb_mo - cur_mo, 2)
+    cur_ri_mo = round(current_mo * (cur_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(cur_mo * 0.55, 2)
+
     reg_norm = (region or "").strip().lower()
     sh_pct = (
         25.0
@@ -298,6 +419,18 @@ def build_legacy_record(
     ahb = lic_upper in ("WINDOWS_SERVER", "WINDOWS_CLIENT", "RHEL_BYOS", "SLES_BYOS")
     kind_label = deployment_kind or ("VM Scale Set" if resource_type == TYPE_VMSS else "Standalone VM")
     sched_label = schedule_summary or _format_schedule(schedule_info)
+    wave_label, cli_hint = classify_migration_wave(
+        deployment_kind=kind_label,
+        resource_type=resource_type,
+        name=name,
+        resource_group=resource_group,
+        sku_info=sku_info,
+    )
+    eff_ri_status = ri_status or (
+        "No RI (RI renewal blocked 01/07/2026)" if sku_info.ri_purchase_blocked else "No RI (PAYG / SP)"
+    )
+    adv_text = advisor_info.summary if advisor_info else ""
+    adv_save = advisor_info.estimated_monthly_saving if advisor_info else 0.0
 
     return LegacyVmRecord(
         resource_id=resource_id,
@@ -355,6 +488,25 @@ def build_legacy_record(
         recommended_v5=sku_info.recommended_v5,
         recommended_current=sku_info.recommended_current,
         disk_controller_note=sku_info.disk_controller_note,
+        management_group=management_group or "Tenant Root",
+        cost_allocation_tag=cost_allocation_tag or "Untagged",
+        target_v5_sku=v5_sku,
+        target_v5_hourly_rate=v5_hr,
+        target_v5_monthly=v5_mo,
+        target_v5_savings_vs_feb=v5_save_feb,
+        target_v5_3yr_ri_monthly=v5_ri_mo,
+        target_current_sku=cur_sku,
+        target_current_hourly_rate=cur_hr,
+        target_current_monthly=cur_mo,
+        target_current_savings_vs_feb=cur_save_feb,
+        target_current_3yr_ri_monthly=cur_ri_mo,
+        ri_status=eff_ri_status,
+        ri_expiry_date=ri_expiry_date,
+        advisor_recommendation=adv_text,
+        advisor_monthly_saving=adv_save,
+        quota_status=quota_status,
+        migration_wave=wave_label,
+        migration_cli_hint=cli_hint,
     )
 
 
