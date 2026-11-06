@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import statistics
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -305,10 +307,10 @@ def collect_tenant(
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
             token_key, tokens, endpoint, transport,
-            timeout=min(options.timeout, 20.0), max_retries=2, **extra,
+            timeout=min(options.timeout, 30.0), max_retries=6, **extra,
         )
-        # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
-        # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
+        # Query subscriptions with the largest active legacy vCPU footprint first.
+        # Only query subscriptions that have at least one resource (active or deallocated).
         sub_vcpus: Dict[str, int] = {}
         for row, sku_info, is_vmss, sub_id, capacity in candidates:
             pstate = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
@@ -316,10 +318,6 @@ def collect_tenant(
             sub_vcpus[sub_id] = sub_vcpus.get(sub_id, 0) + weight
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
-        # Azure Cost Management enforces a 12-queries-per-10-seconds burst limit per tenant.
-        # In 'auto' mode, prioritise the top 16 active subscriptions with 2 workers and retry-after backoff.
-        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 16:
-            ordered_subs = ordered_subs[:16]
 
         def _query_one_sub(sub_id: str) -> Tuple[str, Dict[str, ActualVmUsage], Optional[str]]:
             u_map, err_msg = fetch_subscription_actual_costs(
@@ -332,11 +330,14 @@ def collect_tenant(
             return sub_id, u_map, err_msg
 
         data.cost_management_subs_queried = len(ordered_subs)
-        if len(ordered_subs) <= 1:
-            cm_results = [_query_one_sub(s) for s in ordered_subs]
-        else:
-            with ThreadPoolExecutor(max_workers=min(2, len(ordered_subs))) as pool:
-                cm_results = list(pool.map(_query_one_sub, ordered_subs))
+        # Pace Cost Management queries smoothly (~1.0s interval after the initial 6-query burst)
+        # so we stay inside Azure Cost Management's 12-queries-per-10s bucket without 429 penalties.
+        pace_fn = sleep or time.sleep
+        cm_results = []
+        for idx, sub_id in enumerate(ordered_subs):
+            if idx >= 6 and sleep is None:
+                pace_fn(1.0)
+            cm_results.append(_query_one_sub(sub_id))
 
         throttled_count = 0
         for sub_id, sub_usage, warn in cm_results:
@@ -464,6 +465,34 @@ def collect_tenant(
             quota_status=q_status,
         )
         data.records.append(record)
+
+    # Detect observed negotiated EA/MACC consumption discount from Cost Management actuals vs Retail
+    discount_ratios: List[float] = []
+    for rec in data.records:
+        if (
+            rec.actual_last_month_cost is not None
+            and rec.actual_last_month_cost > 0
+            and rec.actual_last_month_hours is not None
+            and rec.actual_last_month_hours >= 100.0
+            and rec.hourly_rate > 0
+        ):
+            eff_hr = rec.actual_last_month_cost / rec.actual_last_month_hours
+            ratio = eff_hr / rec.hourly_rate
+            if 0.40 <= ratio <= 0.96:
+                discount_ratios.append(ratio)
+
+    if len(discount_ratios) >= 3:
+        med_ratio = statistics.median(discount_ratios)
+        disc_pct = round((1.0 - med_ratio) * 100.0, 1)
+        if disc_pct >= 2.0:
+            data.issues.append(Issue(
+                LEVEL_INFO,
+                "negotiated-discount",
+                f"Observed negotiated EA/MACC consumption discount in Cost Management actuals: ~{disc_pct:.1f}% "
+                f"below public Retail PAYG ({med_ratio:.3f}x retail). Current, Feb 2027 and Target v5/v6 PAYG "
+                "costs preserve this discount; 3-Year RI estimates use public RI rates (RIs do not stack with "
+                "MACC/ACD discounts).",
+            ))
 
     data.records.sort(
         key=lambda r: (

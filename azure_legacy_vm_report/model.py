@@ -411,7 +411,12 @@ def build_legacy_record(
     yr_delta = round(mo_delta * 12.0, 2)
     prov_delta = round(prov_feb - prov_current, 2)
 
-    # Calculate post-migration target running costs (preserving actual duty cycle & negotiated discount ratio)
+    # Calculate post-migration target running costs:
+    # - PAYG target (v5_mo / cur_mo) scales current_mo by (target_hourly / legacy_hourly), which preserves
+    #   both the VM's observed duty cycle (billed hours) AND the customer's negotiated EA/MACC discount.
+    # - 3-Year RI target (v5_ri_mo / cur_ri_mo) uses the public 3-Year RI hourly rate (RIs do NOT stack with
+    #   EA/MACC consumption discounts and require a 24x7 commitment; for part-time VMs where discounted PAYG
+    #   is already cheaper than a 24x7 RI, it caps at the PAYG target cost).
     base_hr = quote.hourly_rate if quote.hourly_rate > 0 else 1.0
     v5_sku = target_v5_quote.sku if target_v5_quote else sku_info.target_v5_sku
     v5_hr = target_v5_quote.feb_payg_hourly_rate if target_v5_quote else quote.hourly_rate
@@ -430,7 +435,8 @@ def build_legacy_record(
         else (round(((v5_hr - feb_hourly) / feb_hourly) * 100.0, 2) if feb_hourly > 0 else 0.0)
     )
     v5_save_feb = round(feb_mo - v5_mo, 2)
-    v5_ri_mo = round(current_mo * (v5_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(v5_mo * 0.55, 2)
+    v5_ri_24x7 = round(v5_ri_hr * hours_per_month * max(0, instance_count), 2)
+    v5_ri_mo = min(v5_mo, v5_ri_24x7) if current_mo > 0 else 0.0
 
     cur_sku = target_current_quote.sku if target_current_quote else sku_info.target_current_sku
     cur_hr = target_current_quote.feb_payg_hourly_rate if target_current_quote else round(v5_hr * 1.04, 4)
@@ -449,7 +455,8 @@ def build_legacy_record(
         else (round(((cur_hr - feb_hourly) / feb_hourly) * 100.0, 2) if feb_hourly > 0 else 0.0)
     )
     cur_save_feb = round(feb_mo - cur_mo, 2)
-    cur_ri_mo = round(current_mo * (cur_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(cur_mo * 0.55, 2)
+    cur_ri_24x7 = round(cur_ri_hr * hours_per_month * max(0, instance_count), 2)
+    cur_ri_mo = min(cur_mo, cur_ri_24x7) if current_mo > 0 else 0.0
 
     breakdown_note = _build_cost_breakdown_note(
         legacy_sku=sku_info.sku,
