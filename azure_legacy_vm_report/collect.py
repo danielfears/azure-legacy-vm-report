@@ -305,7 +305,7 @@ def collect_tenant(
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
             token_key, tokens, endpoint, transport,
-            timeout=min(options.timeout, 15.0), max_retries=0, **extra,
+            timeout=min(options.timeout, 20.0), max_retries=2, **extra,
         )
         # Query subscriptions with the largest active legacy vCPU footprint first so the highest-spend
         # subscriptions always get Cost Management actuals before any tenant QPU burst limit is reached.
@@ -317,10 +317,9 @@ def collect_tenant(
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
         # Azure Cost Management enforces a 12-queries-per-10-seconds burst limit per tenant.
-        # In 'auto' mode, prioritise the top 8 active subscriptions (which typically cover >95% of spend)
-        # unless the user explicitly filtered subscriptions via --subscription.
-        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 8:
-            ordered_subs = ordered_subs[:8]
+        # In 'auto' mode, prioritise the top 16 active subscriptions with 2 workers and retry-after backoff.
+        if options.cost_source == COST_SOURCE_AUTO and not options.subscription_filter and len(ordered_subs) > 16:
+            ordered_subs = ordered_subs[:16]
 
         def _query_one_sub(sub_id: str) -> Tuple[str, Dict[str, ActualVmUsage], Optional[str]]:
             u_map, err_msg = fetch_subscription_actual_costs(
@@ -336,7 +335,7 @@ def collect_tenant(
         if len(ordered_subs) <= 1:
             cm_results = [_query_one_sub(s) for s in ordered_subs]
         else:
-            with ThreadPoolExecutor(max_workers=min(4, len(ordered_subs))) as pool:
+            with ThreadPoolExecutor(max_workers=min(2, len(ordered_subs))) as pool:
                 cm_results = list(pool.map(_query_one_sub, ordered_subs))
 
         throttled_count = 0

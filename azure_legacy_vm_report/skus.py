@@ -102,14 +102,17 @@ def _resolve_concrete_targets(sku: str, series: str, vcpus: int) -> Tuple[str, s
     l_n = _snap_size(max(8, vcpus), _STD_L_VCPUS)
     b_n = _snap_size(max(2, vcpus), _STD_B_VCPUS)
 
-    if ser in ("Bv1", "Bsv2", "Basv2", "Bpsv2"):
+    if ser in ("Bsv2", "Basv2", "Bpsv2"):
+        return sku, sku, "standardBSv2Family"
+
+    if ser == "Bv1":
         if "B1LS" in up_sku:
             v5_sku = "Standard_B2ts_v2"
         elif "B1S" in up_sku or "B2S" in up_sku:
             v5_sku = "Standard_B2ls_v2"
         else:
             v5_sku = f"Standard_B{b_n}s_v2"
-        return v5_sku, f"Standard_D{d_n}ls_v6", "standardBSv2Family"
+        return v5_sku, v5_sku, "standardBSv2Family"
 
     if ser in ("Av1", "Basic_A", "Av2"):
         if vcpus <= 2:
