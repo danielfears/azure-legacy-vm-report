@@ -55,6 +55,26 @@ class GenerationSummary:
             return 0.0
         return round((self.monthly_delta / self.current_monthly) * 100.0, 2)
 
+    @property
+    def target_v5_delta_vs_current(self) -> float:
+        return round(self.target_v5_monthly - self.current_monthly, 2)
+
+    @property
+    def target_v5_pct_vs_current(self) -> float:
+        if self.current_monthly <= 0:
+            return 0.0
+        return round((self.target_v5_delta_vs_current / self.current_monthly) * 100.0, 2)
+
+    @property
+    def target_v5_delta_vs_feb(self) -> float:
+        return round(self.target_v5_monthly - self.feb_monthly, 2)
+
+    @property
+    def target_v5_pct_vs_feb(self) -> float:
+        if self.feb_monthly <= 0:
+            return 0.0
+        return round((self.target_v5_delta_vs_feb / self.feb_monthly) * 100.0, 2)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "generation": self.generation,
@@ -74,6 +94,10 @@ class GenerationSummary:
             "legacy_25_feb_monthly": round(self.legacy_25_feb_monthly, 2),
             "service_health_feb_monthly": round(self.service_health_feb_monthly, 2),
             "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_delta_vs_current": self.target_v5_delta_vs_current,
+            "target_v5_pct_vs_current": self.target_v5_pct_vs_current,
+            "target_v5_delta_vs_feb": self.target_v5_delta_vs_feb,
+            "target_v5_pct_vs_feb": self.target_v5_pct_vs_feb,
             "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
             "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
             "target_current_monthly": round(self.target_current_monthly, 2),
@@ -117,6 +141,26 @@ class SkuBreakdownRow:
     target_current_monthly: float = 0.0
     target_current_savings_vs_feb: float = 0.0
 
+    @property
+    def target_v5_delta_vs_current(self) -> float:
+        return round(self.target_v5_monthly - self.current_monthly, 2)
+
+    @property
+    def target_v5_pct_vs_current(self) -> float:
+        if self.current_monthly <= 0:
+            return 0.0
+        return round((self.target_v5_delta_vs_current / self.current_monthly) * 100.0, 2)
+
+    @property
+    def target_v5_delta_vs_feb(self) -> float:
+        return round(self.target_v5_monthly - self.feb_monthly, 2)
+
+    @property
+    def target_v5_pct_vs_feb(self) -> float:
+        if self.feb_monthly <= 0:
+            return 0.0
+        return round((self.target_v5_delta_vs_feb / self.feb_monthly) * 100.0, 2)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "sku": self.sku,
@@ -144,6 +188,10 @@ class SkuBreakdownRow:
             "recommended_current": self.recommended_current,
             "target_v5_sku": self.target_v5_sku,
             "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_delta_vs_current": self.target_v5_delta_vs_current,
+            "target_v5_pct_vs_current": self.target_v5_pct_vs_current,
+            "target_v5_delta_vs_feb": self.target_v5_delta_vs_feb,
+            "target_v5_pct_vs_feb": self.target_v5_pct_vs_feb,
             "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
             "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
             "target_current_sku": self.target_current_sku,

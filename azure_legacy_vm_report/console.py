@@ -133,17 +133,27 @@ def render_console(report: Report, *, width: Optional[int] = None, color: bool =
     if any(t.fetched for t in report.tenants):
         emit()
         emit(
-            f"  Annualised impact from 01/02/2027: "
-            f"{paint(format_money(gt.annual_delta, cur, signed=True) + '/yr', 'bad' if gt.annual_delta > 0 else 'ok')} "
-            f"({format_money(gt.current_monthly * 12.0, cur)}/yr -> {format_money(gt.feb_monthly * 12.0, cur)}/yr)"
+            f"  1. Current cost today:             "
+            f"{paint(format_money(gt.current_monthly, cur) + '/mo', 'bold')} "
+            f"({format_money(gt.current_monthly * 12.0, cur)}/yr)"
+        )
+        emit(
+            f"  2. Feb 2027 doing nothing:         "
+            f"{paint(format_money(gt.feb_monthly, cur) + '/mo', 'warn')} "
+            f"({paint(format_money(gt.monthly_delta, cur, signed=True) + '/mo, ' + format_pct(gt.effective_hike_pct, signed=True) + ' vs today', 'bad' if gt.monthly_delta > 0 else 'ok')} "
+            f"| {format_money(gt.annual_delta, cur, signed=True)}/yr due to legacy SKU hikes)"
         )
         v5_ri_save = round(gt.feb_monthly - gt.target_v5_3yr_ri_monthly, 2)
         emit(
-            f"  Post-migration target (v5 PAYG):   "
+            f"  3. Feb 2027 migrating to v5 PAYG:  "
             f"{paint(format_money(gt.target_v5_monthly, cur) + '/mo', 'ok')} "
-            f"(saves {paint(format_money(gt.target_v5_savings_vs_feb, cur) + '/mo', 'ok')} vs Feb 2027; "
-            f"or {paint(format_money(gt.target_v5_3yr_ri_monthly, cur) + '/mo', 'ok')} with 3-Year RI/SP, "
-            f"saving {paint(format_money(v5_ri_save, cur) + '/mo', 'ok')})"
+            f"({paint(format_money(gt.target_v5_delta_vs_current, cur, signed=True) + '/mo (' + format_pct(gt.target_v5_pct_vs_current, signed=True) + ') vs today', 'ok' if gt.target_v5_delta_vs_current <= 0 else 'warn')}; "
+            f"{paint(format_money(gt.target_v5_delta_vs_feb, cur, signed=True) + '/mo (' + format_pct(gt.target_v5_pct_vs_feb, signed=True) + ') vs doing nothing', 'ok')})"
+        )
+        emit(
+            f"  4. Feb 2027 migrating to v5 3Y RI: "
+            f"{paint(format_money(gt.target_v5_3yr_ri_monthly, cur) + '/mo', 'ok')} "
+            f"(saves {paint(format_money(v5_ri_save, cur) + '/mo', 'ok')} vs doing nothing in Feb 2027)"
         )
         if gt.deallocated_instances > 0 and not report.include_deallocated_cost:
             emit(

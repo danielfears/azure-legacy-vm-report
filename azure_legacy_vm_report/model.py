@@ -139,13 +139,22 @@ class LegacyVmRecord:
     target_v5_sku: str = ""
     target_v5_hourly_rate: float = 0.0
     target_v5_monthly: float = 0.0
+    target_v5_delta_vs_current: float = 0.0
+    target_v5_pct_vs_current: float = 0.0
+    target_v5_delta_vs_feb: float = 0.0
+    target_v5_pct_vs_feb: float = 0.0
     target_v5_savings_vs_feb: float = 0.0
     target_v5_3yr_ri_monthly: float = 0.0
     target_current_sku: str = ""
     target_current_hourly_rate: float = 0.0
     target_current_monthly: float = 0.0
+    target_current_delta_vs_current: float = 0.0
+    target_current_pct_vs_current: float = 0.0
+    target_current_delta_vs_feb: float = 0.0
+    target_current_pct_vs_feb: float = 0.0
     target_current_savings_vs_feb: float = 0.0
     target_current_3yr_ri_monthly: float = 0.0
+    cost_breakdown_note: str = ""
     ri_status: str = ""
     ri_expiry_date: str = ""
     advisor_recommendation: str = ""
@@ -227,13 +236,22 @@ class LegacyVmRecord:
             "target_v5_sku": self.target_v5_sku,
             "target_v5_hourly_rate": round(self.target_v5_hourly_rate, 4),
             "target_v5_monthly": round(self.target_v5_monthly, 2),
+            "target_v5_delta_vs_current": round(self.target_v5_delta_vs_current, 2),
+            "target_v5_pct_vs_current": round(self.target_v5_pct_vs_current, 2),
+            "target_v5_delta_vs_feb": round(self.target_v5_delta_vs_feb, 2),
+            "target_v5_pct_vs_feb": round(self.target_v5_pct_vs_feb, 2),
             "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
             "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
             "target_current_sku": self.target_current_sku,
             "target_current_hourly_rate": round(self.target_current_hourly_rate, 4),
             "target_current_monthly": round(self.target_current_monthly, 2),
+            "target_current_delta_vs_current": round(self.target_current_delta_vs_current, 2),
+            "target_current_pct_vs_current": round(self.target_current_pct_vs_current, 2),
+            "target_current_delta_vs_feb": round(self.target_current_delta_vs_feb, 2),
+            "target_current_pct_vs_feb": round(self.target_current_pct_vs_feb, 2),
             "target_current_savings_vs_feb": round(self.target_current_savings_vs_feb, 2),
             "target_current_3yr_ri_monthly": round(self.target_current_3yr_ri_monthly, 2),
+            "cost_breakdown_note": self.cost_breakdown_note,
             "ri_status": self.ri_status,
             "ri_expiry_date": self.ri_expiry_date,
             "advisor_recommendation": self.advisor_recommendation,
@@ -399,6 +417,18 @@ def build_legacy_record(
     v5_hr = target_v5_quote.feb_payg_hourly_rate if target_v5_quote else quote.hourly_rate
     v5_ri_hr = target_v5_quote.ri_3y_hourly_rate if target_v5_quote else round(v5_hr * 0.55, 4)
     v5_mo = round(current_mo * (v5_hr / base_hr), 2) if quote.hourly_rate > 0 else current_mo
+    v5_delta_cur = round(v5_mo - current_mo, 2)
+    v5_pct_cur = (
+        round((v5_delta_cur / current_mo) * 100.0, 2)
+        if current_mo > 0
+        else (round(((v5_hr - base_hr) / base_hr) * 100.0, 2) if base_hr > 0 else 0.0)
+    )
+    v5_delta_feb = round(v5_mo - feb_mo, 2)
+    v5_pct_feb = (
+        round((v5_delta_feb / feb_mo) * 100.0, 2)
+        if feb_mo > 0
+        else (round(((v5_hr - feb_hourly) / feb_hourly) * 100.0, 2) if feb_hourly > 0 else 0.0)
+    )
     v5_save_feb = round(feb_mo - v5_mo, 2)
     v5_ri_mo = round(current_mo * (v5_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(v5_mo * 0.55, 2)
 
@@ -406,8 +436,28 @@ def build_legacy_record(
     cur_hr = target_current_quote.feb_payg_hourly_rate if target_current_quote else round(v5_hr * 1.04, 4)
     cur_ri_hr = target_current_quote.ri_3y_hourly_rate if target_current_quote else round(cur_hr * 0.55, 4)
     cur_mo = round(current_mo * (cur_hr / base_hr), 2) if quote.hourly_rate > 0 else current_mo
+    cur_delta_cur = round(cur_mo - current_mo, 2)
+    cur_pct_cur = (
+        round((cur_delta_cur / current_mo) * 100.0, 2)
+        if current_mo > 0
+        else (round(((cur_hr - base_hr) / base_hr) * 100.0, 2) if base_hr > 0 else 0.0)
+    )
+    cur_delta_feb = round(cur_mo - feb_mo, 2)
+    cur_pct_feb = (
+        round((cur_delta_feb / feb_mo) * 100.0, 2)
+        if feb_mo > 0
+        else (round(((cur_hr - feb_hourly) / feb_hourly) * 100.0, 2) if feb_hourly > 0 else 0.0)
+    )
     cur_save_feb = round(feb_mo - cur_mo, 2)
     cur_ri_mo = round(current_mo * (cur_ri_hr / base_hr), 2) if quote.hourly_rate > 0 else round(cur_mo * 0.55, 2)
+
+    breakdown_note = _build_cost_breakdown_note(
+        legacy_sku=sku_info.sku,
+        target_sku=v5_sku,
+        hike_pct=hike_pct,
+        pct_vs_cur=v5_pct_cur,
+        pct_vs_feb=v5_pct_feb,
+    )
 
     reg_norm = (region or "").strip().lower()
     sh_pct = (
@@ -493,13 +543,22 @@ def build_legacy_record(
         target_v5_sku=v5_sku,
         target_v5_hourly_rate=v5_hr,
         target_v5_monthly=v5_mo,
+        target_v5_delta_vs_current=v5_delta_cur,
+        target_v5_pct_vs_current=v5_pct_cur,
+        target_v5_delta_vs_feb=v5_delta_feb,
+        target_v5_pct_vs_feb=v5_pct_feb,
         target_v5_savings_vs_feb=v5_save_feb,
         target_v5_3yr_ri_monthly=v5_ri_mo,
         target_current_sku=cur_sku,
         target_current_hourly_rate=cur_hr,
         target_current_monthly=cur_mo,
+        target_current_delta_vs_current=cur_delta_cur,
+        target_current_pct_vs_current=cur_pct_cur,
+        target_current_delta_vs_feb=cur_delta_feb,
+        target_current_pct_vs_feb=cur_pct_feb,
         target_current_savings_vs_feb=cur_save_feb,
         target_current_3yr_ri_monthly=cur_ri_mo,
+        cost_breakdown_note=breakdown_note,
         ri_status=eff_ri_status,
         ri_expiry_date=ri_expiry_date,
         advisor_recommendation=adv_text,
@@ -508,6 +567,36 @@ def build_legacy_record(
         migration_wave=wave_label,
         migration_cli_hint=cli_hint,
     )
+
+
+def _build_cost_breakdown_note(
+    *,
+    legacy_sku: str,
+    target_sku: str,
+    hike_pct: float,
+    pct_vs_cur: float,
+    pct_vs_feb: float,
+) -> str:
+    """Return a clear explanation of migrating vs not migrating (both vs today and vs Feb 2027)."""
+    stay_str = (
+        f"Not migrating: +{hike_pct:g}% on {legacy_sku} from Feb 2027"
+        if hike_pct > 0.01
+        else f"Not migrating: 0% list-price hike on {legacy_sku} in Feb 2027"
+    )
+    if pct_vs_cur < -0.1:
+        mig_cur_str = f"Migrating to {target_sku}: {pct_vs_cur:+.1f}% vs today (new SKU is cheaper)"
+    elif pct_vs_cur > 0.1:
+        mig_cur_str = f"Migrating to {target_sku}: {pct_vs_cur:+.1f}% vs today (new SKU rate/size uplift)"
+    else:
+        mig_cur_str = f"Migrating to {target_sku}: 0.0% vs today (same compute rate)"
+
+    if pct_vs_feb < -0.1:
+        vs_feb_str = f"saves {abs(pct_vs_feb):.1f}% vs not migrating in Feb 2027"
+    elif pct_vs_feb > 0.1:
+        vs_feb_str = f"{pct_vs_feb:+.1f}% vs not migrating in Feb 2027"
+    else:
+        vs_feb_str = "0.0% vs Feb 2027 PAYG (unlocks 3Y RI/SP)"
+    return f"{stay_str} · {mig_cur_str}, {vs_feb_str}"
 
 
 @dataclass
