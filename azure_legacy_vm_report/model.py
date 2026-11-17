@@ -17,7 +17,7 @@ from .pricing import (
     PriceQuote,
     TargetPriceQuote,
 )
-from .skus import SkuInfo
+from .skus import SkuInfo, diskless_pool_v5_sku
 
 WAVE_1_RESIZE = "Wave 1: Drop-in v5 Resize (SCSI)"
 WAVE_2_POOL = "Wave 2: Managed Pool Replace (AKS/PaaS)"
@@ -145,6 +145,7 @@ class LegacyVmRecord:
     target_v5_pct_vs_feb: float = 0.0
     target_v5_savings_vs_feb: float = 0.0
     target_v5_3yr_ri_monthly: float = 0.0
+    target_v5_3yr_ri_24x7_monthly: float = 0.0
     target_current_sku: str = ""
     target_current_hourly_rate: float = 0.0
     target_current_monthly: float = 0.0
@@ -154,6 +155,7 @@ class LegacyVmRecord:
     target_current_pct_vs_feb: float = 0.0
     target_current_savings_vs_feb: float = 0.0
     target_current_3yr_ri_monthly: float = 0.0
+    target_current_3yr_ri_24x7_monthly: float = 0.0
     cost_breakdown_note: str = ""
     ri_status: str = ""
     ri_expiry_date: str = ""
@@ -242,6 +244,7 @@ class LegacyVmRecord:
             "target_v5_pct_vs_feb": round(self.target_v5_pct_vs_feb, 2),
             "target_v5_savings_vs_feb": round(self.target_v5_savings_vs_feb, 2),
             "target_v5_3yr_ri_monthly": round(self.target_v5_3yr_ri_monthly, 2),
+            "target_v5_3yr_ri_24x7_monthly": round(self.target_v5_3yr_ri_24x7_monthly, 2),
             "target_current_sku": self.target_current_sku,
             "target_current_hourly_rate": round(self.target_current_hourly_rate, 4),
             "target_current_monthly": round(self.target_current_monthly, 2),
@@ -251,6 +254,7 @@ class LegacyVmRecord:
             "target_current_pct_vs_feb": round(self.target_current_pct_vs_feb, 2),
             "target_current_savings_vs_feb": round(self.target_current_savings_vs_feb, 2),
             "target_current_3yr_ri_monthly": round(self.target_current_3yr_ri_monthly, 2),
+            "target_current_3yr_ri_24x7_monthly": round(self.target_current_3yr_ri_24x7_monthly, 2),
             "cost_breakdown_note": self.cost_breakdown_note,
             "ri_status": self.ri_status,
             "ri_expiry_date": self.ri_expiry_date,
@@ -271,6 +275,18 @@ def _format_schedule(sched: Optional[VmScheduleInfo]) -> str:
     return sched.status
 
 
+def is_managed_pool_kind(deployment_kind: str) -> bool:
+    """True when the workload is a managed node pool replaced by rolling nodes rather than in-place az vm resize."""
+    kind = (deployment_kind or "").strip()
+    return "AKS Node Pool" in kind or kind in (
+        "Databricks Node",
+        "OpenShift / ARO Node",
+        "Batch Pool",
+        "ML Compute",
+        "Ephemeral / CI Job VM",
+    )
+
+
 def classify_migration_wave(
     *,
     deployment_kind: str,
@@ -278,41 +294,51 @@ def classify_migration_wave(
     name: str,
     resource_group: str,
     sku_info: SkuInfo,
+    effective_v5_sku: str = "",
 ) -> Tuple[str, str]:
     """Return ``(migration_wave, migration_cli_hint)`` for a legacy deployment."""
     kind = (deployment_kind or "").strip()
     rg = (resource_group or "<rg>").strip()
     rname = (name or "<name>").strip()
-    v5_sku = sku_info.target_v5_sku or "Standard_D2s_v5"
+    v5_sku = effective_v5_sku or sku_info.target_v5_sku or "Standard_D2ds_v5"
     cur_sku = sku_info.target_current_sku or "Standard_D2s_v6"
 
-    if sku_info.series in ("NP", "HC", "HB", "HBv2", "H", "NC", "ND", "NV", "NVv3", "NCv3", "DCs", "DCsv2", "Av1", "Basic_A"):
+    if sku_info.series in (
+        "NP", "HC", "HB", "HBv2", "H",
+        "NC", "ND", "NV", "NCv2", "NDv2", "NVv2", "NVv3", "NCv3", "NCasT4_v3",
+        "DCs", "DCsv2", "Av1", "Basic_A",
+    ):
         return (
             WAVE_3_REBUILD,
             f"Rebuild on Gen2 image (NVMe + MANA) targeting {cur_sku} or {v5_sku}",
         )
 
-    if (
-        "AKS Node Pool" in kind
-        or kind in ("Databricks Node", "OpenShift / ARO Node", "Batch Pool", "ML Compute", "Ephemeral / CI Job VM")
-    ):
+    if is_managed_pool_kind(kind):
+        pool_v5, _ = diskless_pool_v5_sku(v5_sku, sku_info.target_quota_family)
         if "AKS Node Pool" in kind:
             cluster_hint = "<cluster>"
             if "(" in kind and "/" in kind:
                 cluster_hint = kind.split("(", 1)[1].split("/", 1)[0].strip()
             return (
                 WAVE_2_POOL,
-                f"az aks nodepool add --cluster-name {cluster_hint} -g {rg} -n v5pool --node-vm-size {v5_sku}",
+                f"az aks nodepool add --cluster-name {cluster_hint} -g {rg} -n v5pool --node-vm-size {pool_v5}",
             )
         return (
             WAVE_2_POOL,
-            f"Rolling-replace managed pool nodes onto {v5_sku} (or Gen2/NVMe {cur_sku})",
+            f"Rolling-replace managed pool nodes onto {pool_v5} (or Gen2/NVMe {cur_sku})",
         )
 
     if resource_type == TYPE_VMSS:
         return (
             WAVE_1_RESIZE,
             f"az vmss update -g {rg} -n {rname} --set sku.name={v5_sku}",
+        )
+
+    if sku_info.series == "Bv1":
+        d_n = next((val for val in (2, 4, 8, 16, 32) if val >= max(2, sku_info.vcpus)), 32)
+        return (
+            WAVE_1_RESIZE,
+            f"az vm resize -g {rg} -n {rname} --size {v5_sku} (or Standard_D{d_n}lds_v5 if VM uses a local temp disk)",
         )
 
     return (
@@ -369,7 +395,23 @@ def build_legacy_record(
         else 0.0
     )
 
-    has_cm = actual_usage is not None and actual_usage.has_data
+    rid_lower = (resource_id or "").strip().lower()
+    is_non_compute_pool = bool(rid_lower) and "/providers/microsoft.compute/" not in rid_lower
+    has_any_billed_signal = actual_usage is not None and (
+        actual_usage.matched_rows > 0
+        or actual_usage.last_month_cost > 0
+        or actual_usage.mtd_cost > 0
+        or actual_usage.last_month_hours > 0
+        or actual_usage.mtd_hours > 0
+    )
+    # Only treat 0-row Cost Management results as authoritative £0 spend when the VM/VMSS is deallocated.
+    # Newly deployed running VMs (within Cost Management's 8-24h ingestion lag) and Batch/ML pools whose
+    # worker meters emit under child node IDs fall back cleanly to schedule/Retail rates.
+    has_cm = bool(
+        actual_usage is not None
+        and actual_usage.has_data
+        and (has_any_billed_signal or (not billed_now and not is_non_compute_pool))
+    )
     last_mo_cost = round(actual_usage.last_month_cost, 2) if has_cm and actual_usage else None
     last_mo_hrs = round(actual_usage.last_month_hours, 1) if has_cm and actual_usage else None
     mtd_cost = round(actual_usage.mtd_cost, 2) if has_cm and actual_usage else None
@@ -482,6 +524,7 @@ def build_legacy_record(
         name=name,
         resource_group=resource_group,
         sku_info=sku_info,
+        effective_v5_sku=v5_sku,
     )
     eff_ri_status = ri_status or (
         "No RI (RI renewal blocked 01/07/2026)" if sku_info.ri_purchase_blocked else "No RI (PAYG / SP)"
@@ -556,6 +599,7 @@ def build_legacy_record(
         target_v5_pct_vs_feb=v5_pct_feb,
         target_v5_savings_vs_feb=v5_save_feb,
         target_v5_3yr_ri_monthly=v5_ri_mo,
+        target_v5_3yr_ri_24x7_monthly=v5_ri_24x7,
         target_current_sku=cur_sku,
         target_current_hourly_rate=cur_hr,
         target_current_monthly=cur_mo,
@@ -565,6 +609,7 @@ def build_legacy_record(
         target_current_pct_vs_feb=cur_pct_feb,
         target_current_savings_vs_feb=cur_save_feb,
         target_current_3yr_ri_monthly=cur_ri_mo,
+        target_current_3yr_ri_24x7_monthly=cur_ri_24x7,
         cost_breakdown_note=breakdown_note,
         ri_status=eff_ri_status,
         ri_expiry_date=ri_expiry_date,

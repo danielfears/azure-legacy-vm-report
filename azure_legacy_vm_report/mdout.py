@@ -159,6 +159,35 @@ def _tenant_md(report: Report, tenant: TenantReport) -> List[str]:
         ]
         lines += _table(sku_headers, sku_rows, ["l", "l", "l", "r", "r", "r", "r", "r", "r", "l", "l"])
 
+        if tenant.management_group_rows:
+            lines += ["", "### Management group breakdown", ""]
+            mg_headers = [
+                "Management group",
+                "Subscriptions",
+                "Instances",
+                "vCPUs",
+                "Current / mo",
+                "Feb 2027 / mo",
+                "Increase / mo",
+                "Target v5 / mo",
+                "Save vs Feb / mo",
+            ]
+            mg_rows = [
+                [
+                    row.management_group,
+                    str(row.subscription_count),
+                    str(row.total_instances),
+                    str(row.total_vcpus),
+                    format_money(row.current_monthly, cur),
+                    format_money(row.feb_monthly, cur),
+                    format_money(row.monthly_delta, cur, signed=True),
+                    format_money(row.target_v5_monthly, cur),
+                    format_money(row.target_v5_savings_vs_feb, cur, signed=True),
+                ]
+                for row in tenant.management_group_rows
+            ]
+            lines += _table(mg_headers, mg_rows, ["l", "r", "r", "r", "r", "r", "r", "r", "r"])
+
         lines += ["", "### Subscription breakdown", ""]
         sub_headers = [
             "Subscription",
@@ -189,47 +218,49 @@ def _tenant_md(report: Report, tenant: TenantReport) -> List[str]:
         ]
         lines += _table(sub_headers, sub_rows, ["l", "r", "r", "r", "r", "r", "r", "r", "r", "r"])
 
-        lines += ["", f"### Deployed legacy VMs & scale sets ({len(tenant.records)})", ""]
+        shown_md_vms = tenant.records[:50]
+        vm_heading = (
+            f"### Top {len(shown_md_vms)} of {len(tenant.records)} legacy VMs & scale sets by hike impact"
+            if len(tenant.records) > 50
+            else f"### Deployed legacy VMs & scale sets ({len(tenant.records)})"
+        )
+        lines += ["", vm_heading, ""]
         vm_headers = [
             "Name",
             "Subscription",
-            "Resource group",
             "Region",
             "SKU",
             "Gen",
-            "OS / Licensing",
             "State",
-            "Schedule",
-            "Last mo hrs",
-            "Hourly rate",
             "Current / mo",
             "Feb 2027 / mo",
-            "Increase / mo",
-            "Recommended target",
+            "Hike / mo",
+            "Target SKU",
+            "Plan / mo",
         ]
         vm_rows = []
-        for rec in tenant.records:
+        for rec in shown_md_vms:
             name_label = f"{rec.name} (VMSS x{rec.instance_count})" if rec.resource_type == TYPE_VMSS else rec.name
-            os_label = f"{rec.os_type} (AHB)" if rec.hybrid_benefit else rec.os_type
-            hrs_label = f"{rec.actual_last_month_hours:.0f}h" if rec.actual_last_month_hours is not None else "n/a"
+            hike_str = format_money(rec.monthly_delta, cur, signed=True) if abs(rec.monthly_delta) > 0.005 else "—"
             vm_rows.append([
                 name_label,
                 rec.subscription_name,
-                rec.resource_group,
                 rec.region,
                 rec.sku,
                 rec.generation,
-                os_label,
                 rec.power_state,
-                rec.auto_shutdown_schedule or "—",
-                hrs_label,
-                format_hourly(rec.hourly_rate, cur),
                 format_money(rec.current_monthly, cur),
                 format_money(rec.feb_monthly, cur),
-                format_money(rec.monthly_delta, cur, signed=True),
-                rec.recommended_v5,
+                hike_str,
+                rec.target_v5_sku or rec.recommended_v5,
+                format_money(rec.target_v5_monthly, cur),
             ])
-        lines += _table(vm_headers, vm_rows, ["l", "l", "l", "l", "l", "l", "l", "l", "l", "r", "r", "r", "r", "r", "l"])
+        lines += _table(vm_headers, vm_rows, ["l", "l", "l", "l", "l", "l", "r", "r", "r", "l", "r"])
+        if len(tenant.records) > 50:
+            lines += [
+                "",
+                f"_Showing top 50 of {len(tenant.records)} deployments by hike impact; see `-vms.csv` or `.html` for the complete inventory._",
+            ]
 
     if tenant.issues:
         lines += ["", "### Notes", ""]

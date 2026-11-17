@@ -384,9 +384,29 @@ def _demo_compute_quotas() -> List[Dict[str, Any]]:
             "limit": 350,
         },
         {
+            "name": {"value": "standardDDSv5Family", "localizedValue": "Standard DDSv5 Family vCPUs"},
+            "currentValue": 48,
+            "limit": 350,
+        },
+        {
             "name": {"value": "standardDlsv5Family", "localizedValue": "Standard Dlsv5 Family vCPUs"},
             "currentValue": 16,
             "limit": 250,
+        },
+        {
+            "name": {"value": "standardDldsv5Family", "localizedValue": "Standard Dldsv5 Family vCPUs"},
+            "currentValue": 16,
+            "limit": 250,
+        },
+        {
+            "name": {"value": "standardESv5Family", "localizedValue": "Standard ESv5 Family vCPUs"},
+            "currentValue": 32,
+            "limit": 200,
+        },
+        {
+            "name": {"value": "standardEDSv5Family", "localizedValue": "Standard EDSv5 Family vCPUs"},
+            "currentValue": 32,
+            "limit": 200,
         },
         {
             "name": {"value": "standardESv5Family", "localizedValue": "Standard ESv5 Family vCPUs"},

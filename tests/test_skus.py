@@ -124,23 +124,67 @@ class SkuClassificationTests(unittest.TestCase):
         d8v3 = classify_vm_sku("Standard_D8s_v3")
         e16v3 = classify_vm_sku("Standard_E16s_v3")
         b2s = classify_vm_sku("Standard_B2s")
-        assert f16 and d8v3 and e16v3 and b2s
+        b1ms = classify_vm_sku("Standard_B1ms")
+        b1s = classify_vm_sku("Standard_B1s")
+        b2ms = classify_vm_sku("Standard_B2ms")
+        assert f16 and d8v3 and e16v3 and b2s and b1ms and b1s and b2ms
 
-        self.assertEqual(f16.target_v5_sku, "Standard_D16ls_v5")
+        self.assertEqual(f16.target_v5_sku, "Standard_D16lds_v5")
         self.assertEqual(f16.target_current_sku, "Standard_F16als_v6")
+        self.assertEqual(f16.target_quota_family, "standardDldsv5Family")
         self.assertTrue(f16.ri_purchase_blocked)
 
-        self.assertEqual(d8v3.target_v5_sku, "Standard_D8s_v5")
+        self.assertEqual(d8v3.target_v5_sku, "Standard_D8ds_v5")
         self.assertEqual(d8v3.target_current_sku, "Standard_D8s_v6")
-        self.assertEqual(d8v3.target_quota_family, "standardDSv5Family")
+        self.assertEqual(d8v3.target_quota_family, "standardDDSv5Family")
         self.assertTrue(d8v3.ri_purchase_blocked)
 
-        self.assertEqual(e16v3.target_v5_sku, "Standard_E16s_v5")
+        self.assertEqual(e16v3.target_v5_sku, "Standard_E16ds_v5")
         self.assertEqual(e16v3.target_current_sku, "Standard_E16s_v6")
+        self.assertEqual(e16v3.target_quota_family, "standardEDSv5Family")
         self.assertTrue(e16v3.ri_purchase_blocked)
 
         self.assertEqual(b2s.target_v5_sku, "Standard_B2ls_v2")
+        self.assertEqual(b2s.target_current_sku, "Standard_D2ls_v6")
         self.assertTrue(b2s.ri_purchase_blocked)
+        self.assertEqual(b1ms.target_v5_sku, "Standard_B2ls_v2")
+        self.assertEqual(b1s.target_v5_sku, "Standard_B2ts_v2")
+        self.assertEqual(b2ms.target_v5_sku, "Standard_B2s_v2")
+        self.assertEqual(b2ms.target_current_sku, "Standard_D2s_v6")
+
+    def test_memory_optimised_d11_d15_constrained_cores_and_v2_gpus(self) -> None:
+        ds13 = classify_vm_sku("Standard_DS13_v2")
+        ds14_4 = classify_vm_sku("Standard_DS14-4_v2")
+        e16_4 = classify_vm_sku("Standard_E16-4s_v3")
+        nd40v2 = classify_vm_sku("Standard_ND40rs_v2")
+        nc6v2 = classify_vm_sku("Standard_NC6s_v2")
+        d4sv4 = classify_vm_sku("Standard_D4s_v4", include_modern_regional=True)
+        d4dsv4 = classify_vm_sku("Standard_D4ds_v4", include_modern_regional=True)
+        assert ds13 and ds14_4 and e16_4 and nd40v2 and nc6v2 and d4sv4 and d4dsv4
+
+        # D11-D15 / DS11-DS15 carry 7 GiB RAM/vCPU and map to E-series
+        self.assertEqual(ds13.category, "Memory optimised")
+        self.assertEqual(ds13.target_v5_sku, "Standard_E8ds_v5")
+        self.assertEqual(ds13.target_current_sku, "Standard_E8s_v6")
+
+        # Constrained-core SKUs preserve their active core cap on Edsv5 / Esv6
+        self.assertEqual(ds14_4.active_vcpus, 4)
+        self.assertEqual(ds14_4.target_v5_sku, "Standard_E16-4ds_v5")
+        self.assertEqual(ds14_4.target_current_sku, "Standard_E16-4s_v6")
+        self.assertEqual(e16_4.target_v5_sku, "Standard_E16-4ds_v5")
+        self.assertEqual(e16_4.target_current_sku, "Standard_E16-4s_v6")
+
+        # v2 GPU series classify as GPU accelerated and size NVadsA10_v5 proportionally
+        self.assertEqual(nd40v2.series, "NDv2")
+        self.assertEqual(nd40v2.category, "GPU accelerated")
+        self.assertEqual(nd40v2.target_v5_sku, "Standard_NV72ads_A10_v5")
+        self.assertEqual(nc6v2.series, "NCv2")
+        self.assertEqual(nc6v2.category, "GPU accelerated")
+        self.assertEqual(nc6v2.target_v5_sku, "Standard_NV6ads_A10_v5")
+
+        # Modern v4 diskless vs temp-disk targets
+        self.assertEqual(d4sv4.target_v5_sku, "Standard_D4s_v5")
+        self.assertEqual(d4dsv4.target_v5_sku, "Standard_D4ds_v5")
 
     def test_include_modern_regional_skus_option(self) -> None:
         self.assertIsNone(classify_vm_sku("Standard_D4s_v5", include_modern_regional=False))

@@ -155,7 +155,7 @@ class AzCli:
         with self._lock:
             process = subprocess.Popen(
                 command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, env=self._env, start_new_session=True,
+                text=True, encoding="utf-8", errors="replace", env=self._env, start_new_session=True,
             )
             self._running = process
             try:
@@ -272,12 +272,20 @@ class AzCliTokenProvider(TokenProvider):
 
     def _expiry(self, data: Mapping[str, Any]) -> float:
         epoch = data.get("expires_on")
-        if isinstance(epoch, (int, float)):
-            return float(epoch)
-        try:
-            return datetime.strptime(str(data.get("expiresOn")), "%Y-%m-%d %H:%M:%S.%f").timestamp()
-        except ValueError:
-            return self._clock() + 20 * 60
+        if epoch is not None and not isinstance(epoch, bool):
+            try:
+                val = float(epoch)
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                pass
+        raw_on = str(data.get("expiresOn") or "").strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(raw_on, fmt).timestamp()
+            except ValueError:
+                continue
+        return self._clock() + 20 * 60
 
 
 @dataclass(frozen=True)

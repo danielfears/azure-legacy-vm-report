@@ -54,17 +54,115 @@ class CliAndOutputsTests(unittest.TestCase):
             self.assertIn(csp_hash(STYLE), html_text)
             self.assertIn(csp_hash(SCRIPT), html_text)
             self.assertIn('id="hike-simulator"', html_text)
+            self.assertFalse(any(ord(ch) < 32 and ch not in "\r\n\t" for ch in html_text))
 
     def test_service_health_hike_model_cli(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
         rc = run_cli(
-            ["--demo", "--hike-model", "service-health", "--quiet"],
+            ["--demo", "--hike-model", "service-health", "--format", "console", "--quiet"],
             stdout=stdout,
             stderr=stderr,
         )
         self.assertEqual(rc, EXIT_OK)
         self.assertIn("Service Health notices", stdout.getvalue())
+
+    def test_default_html_output_and_additive_format_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            default_dir = Path(tmp) / "default"
+            rc1 = run_cli(
+                ["--demo", "--out-dir", str(default_dir), "--no-open", "--quiet"],
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+            self.assertEqual(rc1, EXIT_OK)
+            self.assertEqual([p.suffix for p in default_dir.iterdir()], [".html"])
+
+            extra_dir = Path(tmp) / "extra"
+            stdout2 = io.StringIO()
+            rc2 = run_cli(
+                ["--demo", "--csv", "--json", "--console", "--out-dir", str(extra_dir), "--no-open", "--quiet"],
+                stdout=stdout2,
+                stderr=io.StringIO(),
+            )
+            self.assertEqual(rc2, EXIT_OK)
+            suffixes = sorted(p.suffix for p in extra_dir.iterdir())
+            self.assertEqual(suffixes, [".csv", ".csv", ".csv", ".csv", ".html", ".json"])
+            self.assertIn("Summary by generation", stdout2.getvalue())
+
+    def test_service_health_with_v3_hike_preserves_regional_rules_and_html_features(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sh"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            rc = run_cli(
+                [
+                    "--demo",
+                    "--hike-model",
+                    "service-health",
+                    "--v3-hike",
+                    "10",
+                    "--include-regional-skus",
+                    "--format",
+                    "json,html,md,console",
+                    "--out-dir",
+                    str(out_dir),
+                    "--quiet",
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+            self.assertEqual(rc, EXIT_OK, stderr.getvalue())
+            payload = json.loads(next(out_dir.glob("*.json")).read_text(encoding="utf-8"))
+            self.assertEqual(payload["hike_policy"]["name"], "service-health")
+            self.assertEqual(payload["hike_policy"]["v3_hike_pct"], 10.0)
+            # Dublin (northeurope) D4s_v3 still gets +17% regional hike, while UK South D8s_v3 gets +10%
+            alpha_vms = {v["name"]: v for v in payload["tenants"][0]["vms"]}
+            self.assertAlmostEqual(alpha_vms["vm-dublin-relay-01"]["hike_pct"], 17.0, places=1)
+            self.assertAlmostEqual(alpha_vms["aks-systempool-vmss"]["hike_pct"], 10.0, places=1)
+
+            html_text = next(out_dir.glob("*.html")).read_text(encoding="utf-8")
+            self.assertIn('class="mg-summary-row"', html_text)
+            self.assertIn('data-v5-ri-24x7="', html_text)
+            self.assertIn('id="sim-mig-v5"', html_text)
+            self.assertIn('<option value="v5">v5 only</option>', html_text)
+
+            md_text = next(out_dir.glob("*.md")).read_text(encoding="utf-8")
+            self.assertIn("### Management group breakdown", md_text)
+            self.assertIn("By management group", stdout.getvalue())
+
+    def test_executive_brief_adapts_across_currency_zero_hike_and_single_sub(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "usd"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            rc = run_cli(
+                [
+                    "--demo",
+                    "--currency",
+                    "USD",
+                    "--v1-hike",
+                    "0",
+                    "--v2-hike",
+                    "0",
+                    "--v3-hike",
+                    "0",
+                    "--format",
+                    "html",
+                    "--out-dir",
+                    str(out_dir),
+                    "--quiet",
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+            self.assertEqual(rc, EXIT_OK, stderr.getvalue())
+            html_text = next(out_dir.glob("*.html")).read_text(encoding="utf-8")
+            self.assertIn("0 hiked ($0)", html_text)
+            self.assertIn("Spend Concentration", html_text)
+            self.assertIn("Hiked (&gt;$0) only", html_text)
+            self.assertNotIn("\u00a30", html_text)
+            self.assertNotIn("UK v3", html_text)
 
     def test_invalid_arguments_return_usage_exit_code(self) -> None:
         for bad_args in (

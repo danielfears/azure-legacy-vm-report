@@ -23,6 +23,9 @@ NOT_AVAILABLE = "n/a"
 _LEVEL_STYLES = {LEVEL_ERROR: ("ERROR", "bad"), LEVEL_WARNING: ("WARN", "warn"), LEVEL_INFO: ("NOTE", "dim")}
 
 DEMO_BANNER = "DEMO: synthetic data generated locally. Nothing was read from Azure."
+_MAX_CONSOLE_SKUS = 12
+_MAX_CONSOLE_SUBS = 12
+_MAX_CONSOLE_VMS = 15
 
 
 def _wrap(text: str, width: Optional[int], initial: str, subsequent: str) -> List[str]:
@@ -212,34 +215,38 @@ def _tenant_section(
     elif not tenant.records:
         emit(paint("  No legacy v1, v2 or v3 VM SKUs are deployed in this tenant.", "ok"))
     else:
+        shown_skus = tenant.sku_rows[:_MAX_CONSOLE_SKUS]
         emit()
-        emit(paint("  By legacy SKU", "bold"))
+        sku_title = (
+            f"  Top {len(shown_skus)} of {len(tenant.sku_rows)} legacy SKUs by hike impact"
+            if len(tenant.sku_rows) > _MAX_CONSOLE_SKUS
+            else "  By legacy SKU"
+        )
+        emit(paint(sku_title, "bold"))
         sku_headers = [
             "SKU",
             "Gen",
-            "Series",
             "Inst",
-            "Run/Dealloc",
+            "Run/Off",
             "Current / mo",
             "Feb 2027 / mo",
-            "Increase / mo",
-            "Retires",
-            "Recommended v5 -> v6/v7",
+            "Hike / mo",
+            "Target SKU",
+            "Plan / mo",
         ]
         sku_rows = [
             [
                 row.sku,
                 row.generation,
-                row.series,
                 str(row.instance_count),
                 f"{row.running_instances}/{row.deallocated_instances}",
                 format_money(row.current_monthly, cur),
                 format_money(row.feb_monthly, cur),
-                format_money(row.monthly_delta, cur, signed=True),
-                row.retirement_date,
-                f"{row.recommended_v5} -> {row.recommended_current}",
+                format_money(row.monthly_delta, cur, signed=True) if abs(row.monthly_delta) > 0.005 else "\u2014",
+                row.target_v5_sku or row.recommended_v5,
+                format_money(row.target_v5_monthly, cur),
             ]
-            for row in tenant.sku_rows
+            for row in shown_skus
         ]
         sku_styles = [
             [
@@ -249,26 +256,73 @@ def _tenant_section(
                 None,
                 None,
                 None,
-                None,
-                "bad" if row.monthly_delta > 0 else "dim",
-                "warn" if "2027" in row.retirement_date or "2028" in row.retirement_date else None,
+                "bad" if row.monthly_delta > 0.005 else "dim",
                 "dim",
+                "ok",
             ]
-            for row in tenant.sku_rows
+            for row in shown_skus
         ]
         for line in render_table(
             sku_headers,
             sku_rows,
-            aligns=["l", "l", "l", "r", "r", "r", "r", "r", "l", "l"],
-            flexible=[False, False, False, False, False, False, False, False, False, True],
+            aligns=["l", "l", "r", "r", "r", "r", "r", "l", "r"],
+            flexible=[False, False, False, False, False, False, False, True, False],
             styles=sku_styles,
             width=width,
             palette=palette,
         ):
             emit(line)
+        if len(tenant.sku_rows) > _MAX_CONSOLE_SKUS:
+            emit(paint(f"  \u2026 plus {len(tenant.sku_rows) - _MAX_CONSOLE_SKUS} more SKU(s) in CSV/HTML report.", "dim"))
 
+        if tenant.management_group_rows:
+            emit()
+            emit(paint("  By management group", "bold"))
+            mg_headers = [
+                "Management group",
+                "Subs",
+                "Total Inst",
+                "vCPUs",
+                "Current / mo",
+                "Feb 2027 / mo",
+                "Hike / mo",
+                "Target v5 / mo",
+                "Save vs Feb / mo",
+            ]
+            mg_rows = [
+                [
+                    row.management_group,
+                    str(row.subscription_count),
+                    str(row.total_instances),
+                    str(row.total_vcpus),
+                    format_money(row.current_monthly, cur),
+                    format_money(row.feb_monthly, cur),
+                    format_money(row.monthly_delta, cur, signed=True) if abs(row.monthly_delta) > 0.005 else "\u2014",
+                    format_money(row.target_v5_monthly, cur),
+                    format_money(row.target_v5_savings_vs_feb, cur, signed=True)
+                    if abs(row.target_v5_savings_vs_feb) > 0.005
+                    else "\u2014",
+                ]
+                for row in tenant.management_group_rows
+            ]
+            for line in render_table(
+                mg_headers,
+                mg_rows,
+                aligns=["l", "r", "r", "r", "r", "r", "r", "r", "r"],
+                flexible=[True] + [False] * 8,
+                width=width,
+                palette=palette,
+            ):
+                emit(line)
+
+        shown_subs = tenant.subscription_rows[:_MAX_CONSOLE_SUBS]
         emit()
-        emit(paint("  By subscription", "bold"))
+        sub_title = (
+            f"  Top {len(shown_subs)} of {len(tenant.subscription_rows)} subscriptions by hike impact"
+            if len(tenant.subscription_rows) > _MAX_CONSOLE_SUBS
+            else "  By subscription"
+        )
+        emit(paint(sub_title, "bold"))
         sub_headers = [
             "Subscription",
             "v1",
@@ -278,8 +332,8 @@ def _tenant_section(
             "vCPUs",
             "Current / mo",
             "Feb 2027 / mo",
-            "Increase / mo",
-            "Increase / yr",
+            "Hike / mo",
+            "Plan / mo",
         ]
         sub_rows = [
             [
@@ -291,10 +345,10 @@ def _tenant_section(
                 str(row.total_vcpus),
                 format_money(row.current_monthly, cur),
                 format_money(row.feb_monthly, cur),
-                format_money(row.monthly_delta, cur, signed=True),
-                format_money(row.annual_delta, cur, signed=True),
+                format_money(row.monthly_delta, cur, signed=True) if abs(row.monthly_delta) > 0.005 else "\u2014",
+                format_money(row.target_v5_monthly, cur),
             ]
-            for row in tenant.subscription_rows
+            for row in shown_subs
         ]
         for line in render_table(
             sub_headers,
@@ -305,70 +359,72 @@ def _tenant_section(
             palette=palette,
         ):
             emit(line)
+        if len(tenant.subscription_rows) > _MAX_CONSOLE_SUBS:
+            rem_subs = len(tenant.subscription_rows) - _MAX_CONSOLE_SUBS
+            emit(paint(f"  \u2026 plus {rem_subs} lower-impact subscription(s) in CSV/HTML report.", "dim"))
 
+        shown_vms = tenant.records[:_MAX_CONSOLE_VMS]
         emit()
-        emit(paint(f"  Deployed legacy resources ({len(tenant.records)})", "bold"))
+        vm_title = (
+            f"  Top {len(shown_vms)} of {len(tenant.records)} legacy deployments by hike impact"
+            if len(tenant.records) > _MAX_CONSOLE_VMS
+            else f"  Deployed legacy resources ({len(tenant.records)})"
+        )
+        emit(paint(vm_title, "bold"))
         vm_headers = [
             "Name",
             "Subscription",
-            "Region",
             "SKU",
             "Gen",
-            "OS / Licensing",
             "State",
-            "Schedule / Hrs",
             "Current / mo",
             "Feb 2027 / mo",
-            "Increase / mo",
+            "Hike / mo",
+            "Target SKU",
         ]
         vm_rows = []
         vm_styles = []
-        for rec in tenant.records:
+        for rec in shown_vms:
             name_label = f"{rec.name} (VMSS x{rec.instance_count})" if rec.resource_type == TYPE_VMSS else rec.name
-            os_label = f"{rec.os_type} (AHB)" if rec.hybrid_benefit else rec.os_type
-            sched_parts = []
-            if rec.actual_last_month_hours is not None and rec.actual_last_month_hours > 0:
-                sched_parts.append(f"{rec.actual_last_month_hours:.0f}h")
-            if rec.auto_shutdown_schedule:
-                sched_parts.append(rec.auto_shutdown_schedule)
-            sched_label = " / ".join(sched_parts) if sched_parts else format_hourly(rec.hourly_rate, cur) + "/hr"
             vm_rows.append([
                 name_label,
                 rec.subscription_name,
-                rec.region,
                 rec.sku,
                 rec.generation,
-                os_label,
                 rec.power_state,
-                sched_label,
                 format_money(rec.current_monthly, cur),
                 format_money(rec.feb_monthly, cur),
-                format_money(rec.monthly_delta, cur, signed=True),
+                format_money(rec.monthly_delta, cur, signed=True) if abs(rec.monthly_delta) > 0.005 else "\u2014",
+                rec.target_v5_sku or rec.recommended_v5,
             ])
             state_style = "dim" if rec.power_state == POWER_DEALLOCATED else "ok"
             vm_styles.append([
                 None,
                 None,
                 None,
-                None,
                 "bad" if rec.generation in ("v1", "v2") else "warn",
-                "ok" if rec.hybrid_benefit else None,
                 state_style,
+                None,
+                None,
+                "bad" if rec.monthly_delta > 0.005 else "dim",
                 "dim",
-                None,
-                None,
-                "bad" if rec.monthly_delta > 0 else "dim",
             ])
         for line in render_table(
             vm_headers,
             vm_rows,
-            aligns=["l", "l", "l", "l", "l", "l", "l", "r", "r", "r", "r"],
-            flexible=[True, True, False, False, False, False, False, False, False, False, False],
+            aligns=["l", "l", "l", "l", "l", "r", "r", "r", "l"],
+            flexible=[True, True, False, False, False, False, False, False, False],
             styles=vm_styles,
             width=width,
             palette=palette,
         ):
             emit(line)
+        if len(tenant.records) > _MAX_CONSOLE_VMS:
+            rem_vms = len(tenant.records) - _MAX_CONSOLE_VMS
+            emit(paint(
+                f"  \u2026 plus {rem_vms} more deployment(s) \u2014 open HTML or CSV output for the full inventory.",
+                "dim",
+            ))
 
     if tenant.issues:
         emit()

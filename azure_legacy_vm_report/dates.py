@@ -59,13 +59,57 @@ def parse_instant(
         return None
 
 
+class _EuropeLondonTz(tzinfo):
+    """Stdlib fallback for Europe/London (GMT/BST) on Windows Python without the tzdata package."""
+
+    @staticmethod
+    def _last_sunday(year: int, month: int) -> date:
+        # March and October both have 31 days
+        last_day = date(year, month, 31)
+        offset = (last_day.weekday() + 1) % 7
+        return last_day - timedelta(days=offset)
+
+    @classmethod
+    def _is_bst(cls, dt: Optional[datetime]) -> bool:
+        if dt is None:
+            return False
+        # Convert wall/aware comparison cleanly via naive UTC or local transition rules:
+        # BST runs from last Sunday in March 01:00 UTC to last Sunday in October 01:00 UTC.
+        year = dt.year
+        bst_start_utc = datetime.combine(cls._last_sunday(year, 3), time(1, 0), UTC)
+        bst_end_utc = datetime.combine(cls._last_sunday(year, 10), time(1, 0), UTC)
+        naive = dt.replace(tzinfo=None)
+        start_local = datetime(bst_start_utc.year, 3, bst_start_utc.day, 2, 0)
+        end_local = datetime(bst_end_utc.year, 10, bst_end_utc.day, 1, 0)
+        if start_local <= naive < end_local:
+            return True
+        if end_local <= naive < end_local + timedelta(hours=1):
+            return getattr(dt, "fold", 0) == 0
+        return False
+
+    def utcoffset(self, dt: Optional[datetime]) -> timedelta:
+        return timedelta(hours=1) if self._is_bst(dt) else timedelta(0)
+
+    def dst(self, dt: Optional[datetime]) -> timedelta:
+        return timedelta(hours=1) if self._is_bst(dt) else timedelta(0)
+
+    def tzname(self, dt: Optional[datetime]) -> str:
+        return "BST" if self._is_bst(dt) else "GMT"
+
+
+EUROPE_LONDON_FALLBACK = _EuropeLondonTz()
+
+
 def resolve_timezone(name: str) -> Tuple[tzinfo, Optional[str]]:
     """Return a tzinfo for ``name`` plus a warning when it falls back to UTC."""
-    if (name or "").strip().upper() == "UTC":
+    cleaned = (name or "").strip()
+    if cleaned.upper() in ("UTC", "GMT", "ETC/UTC", "ETC/GMT"):
         return UTC, None
     try:
-        return ZoneInfo(name.strip()), None
+        return ZoneInfo(cleaned), None
     except Exception:  # noqa: BLE001
+        if cleaned.lower() in ("europe/london", "gb", "uk"):
+            return EUROPE_LONDON_FALLBACK, None
         return UTC, f"Time zone '{name}' is not available on this system; using UTC."
 
 

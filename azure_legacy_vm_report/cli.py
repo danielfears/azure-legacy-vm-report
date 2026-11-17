@@ -53,7 +53,10 @@ from .demo import DemoTokens, DemoTransport, build_demo_specs
 from .model import COST_SOURCE_AUTO, VALID_COST_SOURCES
 from .outputs import (
     FORMAT_CONSOLE,
+    FORMAT_CSV,
     FORMAT_HTML,
+    FORMAT_JSON,
+    FORMAT_MARKDOWN,
     default_stem,
     inside_git_repository,
     open_in_browser,
@@ -99,12 +102,12 @@ nothing in Azure.
 
 EPILOG = f"""\
 examples:
-  {PROG}                                        current Azure CLI tenant, console report
-  {PROG} --format console,html,csv --open       console + CSV + interactive HTML report
-  {PROG} --all-tenants --format console,html --open
-  {PROG} --tenant <tenant-id> --hike-model service-health
-  {PROG} --v1-hike 25 --v2-hike 25 --v3-hike 25 --currency GBP
-  {PROG} --demo --format console,html --open    synthetic data, no Azure login needed
+  {PROG}                                        scan current tenant, write & open HTML report
+  {PROG} --csv                                  HTML report + CSV spreadsheets
+  {PROG} --all                                  HTML + CSV + JSON + Markdown + console summary
+  {PROG} --all-tenants                          scan every logged-in tenant into one HTML report
+  {PROG} --tenant <tenant-id> --csv --json
+  {PROG} --demo                                 synthetic data, no Azure login needed
 
 exit status:
   0 success   1 failed (nothing could be analysed)   2 usage error
@@ -184,12 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include modern v4, v5 and v6 VM series alongside v1-v3 (useful for the 7 EU/APAC regional-hike regions).",
     )
     model.add_argument(
-        "--hike-model", choices=VALID_POLICIES, default=POLICY_SERVICE_HEALTH,
+        "--hike-model", choices=VALID_POLICIES, default=None,
         help=(
             "February 2027 price-hike rule: 'service-health' (default) applies +25%% globally to "
             "End-of-Life v1/v2 series and the regional +8-17%% hike to non-excluded v2/v3 series in "
-            "the 7 affected regions (0%% in UK regions); 'legacy-25' applies a blanket +25%% across "
-            "all v1, v2 and v3; 'custom' uses --v1-hike/--v2-hike/--v3-hike."
+            "the 7 affected regions (0%% in UK regions unless --v3-hike is set); 'legacy-25' applies a "
+            "blanket +25%% across all v1, v2 and v3; 'custom' uses --v1-hike/--v2-hike/--v3-hike."
         ),
     )
     model.add_argument(
@@ -240,8 +243,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     out = parser.add_argument_group("output options")
     out.add_argument(
+        "--csv", action="store_true",
+        help="Also write CSV spreadsheets (-vms, -skus, -subscriptions, -summary) alongside the HTML report.",
+    )
+    out.add_argument(
+        "--json", action="store_true",
+        help="Also write the structured JSON report alongside the HTML report.",
+    )
+    out.add_argument(
+        "--md", "--markdown", dest="markdown", action="store_true",
+        help="Also write the GitHub-flavoured Markdown report alongside the HTML report.",
+    )
+    out.add_argument(
+        "--console", action="store_true",
+        help="Also print the plain-text summary tables to stdout.",
+    )
+    out.add_argument(
+        "--all", dest="all_formats", action="store_true",
+        help="Generate all output formats (HTML, CSV, JSON, Markdown and console).",
+    )
+    out.add_argument(
         "--format", "-f", action="append", default=[], metavar="FMT[,FMT]",
-        help="Output format(s): console (default), csv, json, md, html, or all.",
+        help="Explicitly select output format(s): html (default), csv, json, md, console, or all.",
     )
     out.add_argument(
         "--out-dir", "-o", type=Path, default=None, metavar="DIR",
@@ -249,7 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     out.add_argument(
         "--open", action="store_true",
-        help="Open the generated HTML report in your default browser.",
+        help="Open the generated HTML report in your default browser (enabled automatically in interactive terminals).",
+    )
+    out.add_argument(
+        "--no-open", action="store_true",
+        help="Do not open the HTML report in your browser automatically.",
     )
     out.add_argument(
         "--tz", default=DEFAULT_TZ, metavar="ZONE",
@@ -281,9 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _resolve_hike_policy(args: argparse.Namespace) -> HikePolicy:
     custom_given = any(x is not None for x in (args.v1_hike, args.v2_hike, args.v3_hike))
-    mode = args.hike_model
-    if custom_given:
-        mode = POLICY_CUSTOM
+    if args.hike_model is not None:
+        mode = args.hike_model
+        if mode == POLICY_LEGACY_25 and custom_given:
+            mode = POLICY_CUSTOM
+    else:
+        mode = POLICY_CUSTOM if custom_given else POLICY_SERVICE_HEALTH
 
     v1 = 25.0 if args.v1_hike is None else float(args.v1_hike)
     v2 = 25.0 if args.v2_hike is None else float(args.v2_hike)
@@ -303,8 +333,23 @@ def _resolve_hike_policy(args: argparse.Namespace) -> HikePolicy:
 
 
 def _validate_args(args: argparse.Namespace) -> Tuple[List[str], Tuple[str, ...], List[str], HikePolicy]:
+    if args.open and getattr(args, "no_open", False):
+        raise UsageError("--open and --no-open cannot be used together.")
+
+    raw_formats: List[str] = list(args.format or [FORMAT_HTML])
+    if getattr(args, "all_formats", False):
+        raw_formats.append("all")
+    if getattr(args, "csv", False):
+        raw_formats.append(FORMAT_CSV)
+    if getattr(args, "json", False):
+        raw_formats.append(FORMAT_JSON)
+    if getattr(args, "markdown", False):
+        raw_formats.append(FORMAT_MARKDOWN)
+    if getattr(args, "console", False):
+        raw_formats.append(FORMAT_CONSOLE)
+
     try:
-        formats = parse_formats(args.format or [FORMAT_CONSOLE])
+        formats = parse_formats(raw_formats)
     except ValueError as exc:
         raise UsageError(str(exc)) from None
 
@@ -601,7 +646,8 @@ def _emit_outputs(
             _progress(err, f"Wrote {path}")
 
     html_files = [path for path in written if path.suffix.lower() == ".html"]
-    should_open = args.open or (bool(html_files) and hasattr(out, "isatty") and out.isatty())
+    no_open = bool(getattr(args, "no_open", False))
+    should_open = not no_open and (args.open or (bool(html_files) and hasattr(out, "isatty") and out.isatty()))
     if html_files and should_open:
         warn = open_in_browser(html_files[0], env=environ)
         if warn and not args.quiet:

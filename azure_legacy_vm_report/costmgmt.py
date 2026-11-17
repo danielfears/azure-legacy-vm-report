@@ -5,12 +5,14 @@ from __future__ import annotations
 import calendar
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from .arm import ArmClient, ArmError
 from .dates import UTC
+from .skus import classify_vm_sku, is_memory_optimised_d_v1_v2
 
 log = logging.getLogger("azure_legacy_vm_report.costmgmt")
 
@@ -107,9 +109,14 @@ class ActiveReservationInfo:
     region: str
     quantity: int
     expiry_date: str              # DD/MM/YYYY or YYYY-MM-DD
-    scope_type: str               # "Shared" or "Single"
+    scope_type: str               # "Shared", "Single", or "ManagementGroup"
     scope_subscription_id: str = ""
+    scope_management_group: str = ""
+    instance_flexibility: str = "on"
+    isf_group: str = ""
+    vcpus_per_unit: int = 1
     remaining_quantity: int = 0
+    remaining_vcpus: int = 0
 
 
 @dataclass
@@ -130,6 +137,7 @@ class ScheduleCatalog:
     aks_pools_by_key: Dict[Tuple[str, str, str], AksPoolProfile] = field(default_factory=dict)
     aks_pools: List[AksPoolProfile] = field(default_factory=list)
     management_groups_by_sub: Dict[str, str] = field(default_factory=dict)
+    mg_ancestors_by_sub: Dict[str, Set[str]] = field(default_factory=dict)
     advisor_by_resource_id: Dict[str, AdvisorRightSizeInfo] = field(default_factory=dict)
     reservations: List[ActiveReservationInfo] = field(default_factory=list)
     quota_by_sub_region_family: Dict[Tuple[str, str, str], QuotaFamilyUsage] = field(default_factory=dict)
@@ -145,6 +153,7 @@ class ActualVmUsage:
     mtd_extrapolated_hours: float = 0.0
     currency: str = ""
     has_data: bool = False
+    matched_rows: int = 0
 
 
 def compute_billing_window(as_of: datetime) -> BillingWindow:
@@ -311,10 +320,31 @@ def fetch_schedule_catalog(
             cprops = crow.get("properties") if isinstance(crow.get("properties"), dict) else {}
             chain = cprops.get("managementGroupAncestorsChain")
             if sid and isinstance(chain, list) and chain:
+                sub_name = str(crow.get("name") or "").strip()
                 first = chain[0] if isinstance(chain[0], dict) else {}
                 mg_label = str(first.get("displayName") or first.get("name") or "").strip()
+                # Enterprise-Scale / CAF landing zones often wrap each subscription in a 1:1 leaf MG
+                # named '<SubName>_mg'; step up to its parent archetype/portfolio MG when available.
+                if (
+                    sub_name
+                    and mg_label.lower().startswith(sub_name.lower())
+                    and len(chain) > 1
+                    and isinstance(chain[1], dict)
+                ):
+                    parent_mg = str(chain[1].get("displayName") or chain[1].get("name") or "").strip()
+                    if parent_mg and parent_mg.lower() not in ("tenant root group", "tenant root"):
+                        mg_label = parent_mg
                 if mg_label:
                     catalog.management_groups_by_sub[sid] = mg_label
+                ancestors: Set[str] = set()
+                for item_mg in chain:
+                    if isinstance(item_mg, dict):
+                        for field_name in ("name", "displayName"):
+                            val = str(item_mg.get(field_name) or "").strip().lower()
+                            if val:
+                                ancestors.add(val)
+                if ancestors:
+                    catalog.mg_ancestors_by_sub[sid] = ancestors
     except ArmError as exc:
         log.debug("Could not query management groups from ResourceContainers: %s", exc)
 
@@ -374,6 +404,39 @@ def fetch_schedule_catalog(
     return catalog
 
 
+def _isf_group_and_vcpus(sku_name: str) -> Tuple[str, int]:
+    """Return ``(isf_group_key, vcpus_per_instance)`` for Instance Size Flexibility matching."""
+    info = classify_vm_sku(sku_name, include_modern_regional=True)
+    if info is None:
+        return (sku_name or "").strip().lower(), 1
+    grp = info.series.lower()
+    if is_memory_optimised_d_v1_v2(info.sku):
+        grp = f"{grp}-mem"
+    return grp, max(1, info.vcpus)
+
+
+def _extract_scope_targets(
+    scopes: Sequence[Any], scope_props: Optional[Mapping[str, Any]]
+) -> Tuple[str, str]:
+    """Extract ``(subscription_id, management_group_id)`` from Azure Reservation scope metadata."""
+    scope_sub = ""
+    scope_mg = ""
+    candidates: List[str] = [str(s or "") for s in scopes]
+    if isinstance(scope_props, Mapping):
+        for k in ("subscriptionId", "managementGroupId"):
+            if scope_props.get(k):
+                candidates.append(str(scope_props[k]))
+    for raw in candidates:
+        parts = raw.strip().strip("/").split("/")
+        for idx, tok in enumerate(parts):
+            low = tok.lower()
+            if low == "subscriptions" and idx + 1 < len(parts) and not scope_sub:
+                scope_sub = parts[idx + 1].lower()
+            elif low == "managementgroups" and idx + 1 < len(parts) and not scope_mg:
+                scope_mg = parts[idx + 1].lower()
+    return scope_sub, scope_mg
+
+
 def fetch_active_vm_reservations(
     client: ArmClient,
     *,
@@ -408,11 +471,14 @@ def fetch_active_vm_reservations(
         exp_date = raw_exp[:10] if len(raw_exp) >= 10 else raw_exp
         scope_type = str(props.get("appliedScopeType") or "Shared").strip()
         scopes = props.get("appliedScopes") if isinstance(props.get("appliedScopes"), list) else []
-        scope_sub = ""
-        if scopes:
-            parts = str(scopes[0] or "").strip("/").split("/")
-            if len(parts) >= 2 and parts[0].lower() == "subscriptions":
-                scope_sub = parts[1].lower()
+        scope_props = (
+            props.get("appliedScopeProperties")
+            if isinstance(props.get("appliedScopeProperties"), dict)
+            else None
+        )
+        scope_sub, scope_mg = _extract_scope_targets(scopes, scope_props)
+        flex = str(props.get("instanceFlexibility") or "On").strip().lower()
+        isf_grp, unit_vcpus = _isf_group_and_vcpus(sku_name)
         reservations.append(
             ActiveReservationInfo(
                 reservation_id=str(item.get("id") or ""),
@@ -423,7 +489,12 @@ def fetch_active_vm_reservations(
                 expiry_date=exp_date,
                 scope_type=scope_type,
                 scope_subscription_id=scope_sub,
+                scope_management_group=scope_mg,
+                instance_flexibility=flex or "on",
+                isf_group=isf_grp,
+                vcpus_per_unit=unit_vcpus,
                 remaining_quantity=qty,
+                remaining_vcpus=qty * unit_vcpus,
             )
         )
     return reservations
@@ -434,17 +505,30 @@ def fetch_subscription_compute_quotas(
     sub_region_pairs: Sequence[Tuple[str, str]],
     *,
     api_version: str = "2024-07-01",
+    max_workers: int = 6,
 ) -> Dict[Tuple[str, str, str], QuotaFamilyUsage]:
-    """Query regional Microsoft.Compute vCPU family usages/limits for ``(subscription_id, region)`` pairs."""
+    """Query regional Microsoft.Compute vCPU family usages/limits for all ``(subscription_id, region)`` pairs."""
     quota_map: Dict[Tuple[str, str, str], QuotaFamilyUsage] = {}
-    seen_pairs = list(dict.fromkeys((s.lower(), r.lower()) for s, r in sub_region_pairs if s and r))[:12]
-    for sub_id, region in seen_pairs:
+    seen_pairs = list(dict.fromkeys((s.lower(), r.lower()) for s, r in sub_region_pairs if s and r))
+    if not seen_pairs:
+        return quota_map
+
+    def _fetch_one(pair: Tuple[str, str]) -> Tuple[str, str, List[Dict[str, Any]]]:
+        sub_id, region = pair
         path = f"/subscriptions/{sub_id}/providers/Microsoft.Compute/locations/{region}/usages"
         try:
-            items = client.list_all(path, api_version)
+            return sub_id, region, client.list_all(path, api_version)
         except ArmError as exc:
             log.debug("Could not read Compute quota usages for %s in %s: %s", sub_id, region, exc)
-            continue
+            return sub_id, region, []
+
+    if len(seen_pairs) == 1 or max_workers <= 1:
+        results = [_fetch_one(pair) for pair in seen_pairs]
+    else:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(seen_pairs))) as pool:
+            results = list(pool.map(_fetch_one, seen_pairs))
+
+    for sub_id, region, items in results:
         for item in items:
             name_obj = item.get("name") if isinstance(item.get("name"), dict) else {}
             fam_val = str(name_obj.get("value") or "").strip()
@@ -513,32 +597,81 @@ def match_reservation_for_vm(
     parent_sku: str,
     instance_count: int,
     ri_purchase_blocked: bool,
+    vcpus_per_instance: int = 0,
+    power_state: str = "Running",
+    mg_ancestors: Optional[Set[str]] = None,
 ) -> Tuple[str, str]:
-    """Match a VM/VMSS against active VM reservations and return ``(ri_status, ri_expiry_date)``."""
+    """Match an active VM/VMSS against VM reservations (ISF & MG scope) and return ``(ri_status, ri_expiry_date)``."""
+    if power_state == "Deallocated" or instance_count <= 0:
+        if ri_purchase_blocked:
+            return "No RI (RI renewal blocked 01/07/2026)", ""
+        return "No RI (PAYG / SP)", ""
+
     sub_l = (subscription_id or "").strip().lower()
     reg_l = (region or "").strip().lower()
     sku_candidates = {s.lower() for s in (sku, parent_sku) if s}
+    vm_isf_group, inferred_vcpus = _isf_group_and_vcpus(parent_sku or sku)
+    unit_vcpus = vcpus_per_instance if vcpus_per_instance > 0 else inferred_vcpus
+    needed_vcpus = max(1, instance_count) * max(1, unit_vcpus)
+    ancestors_l = {m.lower() for m in (mg_ancestors or set())}
 
-    # Check single-subscription RIs first, then shared RIs
-    for pass_shared in (False, True):
+    covered_vcpus = 0
+    matched_expiry = ""
+
+    # Match in Azure billing priority order: Single subscription -> Management Group -> Shared
+    for pass_kind in ("single", "mg", "shared"):
         for res in reservations:
-            if res.remaining_quantity <= 0:
+            res_isf, res_unit_vcpus = (
+                (res.isf_group, max(1, res.vcpus_per_unit))
+                if res.isf_group
+                else _isf_group_and_vcpus(res.sku)
+            )
+            avail_vcpus = (
+                res.remaining_vcpus
+                if res.remaining_vcpus > 0
+                else (res.remaining_quantity * res_unit_vcpus)
+            )
+            if avail_vcpus <= 0:
                 continue
-            is_shared = res.scope_type.lower() == "shared" or not res.scope_subscription_id
-            if is_shared != pass_shared:
-                continue
-            if not is_shared and res.scope_subscription_id != sub_l:
-                continue
+
+            stype = (res.scope_type or "Shared").strip().lower()
+            if pass_kind == "single":
+                if not (res.scope_subscription_id and res.scope_subscription_id == sub_l):
+                    continue
+            elif pass_kind == "mg":
+                if stype != "managementgroup" and not res.scope_management_group:
+                    continue
+                if not res.scope_management_group or res.scope_management_group not in ancestors_l:
+                    continue
+            else:  # shared
+                if stype != "shared" or res.scope_subscription_id or res.scope_management_group:
+                    continue
+
             if res.region and res.region != reg_l:
                 continue
-            if res.sku.lower() not in sku_candidates:
+
+            exact_sku = res.sku.lower() in sku_candidates
+            isf_match = (res.instance_flexibility or "on").lower() != "off" and res_isf == vm_isf_group
+            if not (exact_sku or isf_match):
                 continue
-            covered = min(max(1, instance_count), res.remaining_quantity)
-            res.remaining_quantity -= covered
-            exp_label = res.expiry_date or "active"
-            if covered >= max(1, instance_count):
-                return f"RI Covered (exp {exp_label})", res.expiry_date
-            return f"Partial RI ({covered}/{instance_count}, exp {exp_label})", res.expiry_date
+
+            still_needed = needed_vcpus - covered_vcpus
+            take_vcpus = min(still_needed, avail_vcpus)
+            new_rem_vcpus = avail_vcpus - take_vcpus
+            res.remaining_vcpus = new_rem_vcpus
+            res.remaining_quantity = new_rem_vcpus // res_unit_vcpus
+            covered_vcpus += take_vcpus
+            if not matched_expiry and res.expiry_date:
+                matched_expiry = res.expiry_date
+            if covered_vcpus >= needed_vcpus:
+                exp_label = matched_expiry or "active"
+                return f"RI Covered (exp {exp_label})", matched_expiry
+
+    if covered_vcpus > 0:
+        exp_label = matched_expiry or "active"
+        covered_inst = covered_vcpus / max(1, unit_vcpus)
+        cov_str = f"{int(covered_inst)}" if abs(covered_inst - round(covered_inst)) < 1e-6 else f"{covered_inst:.1f}"
+        return f"Partial RI ({cov_str}/{instance_count}, exp {exp_label})", matched_expiry
 
     if ri_purchase_blocked:
         return "No RI (RI renewal blocked 01/07/2026)", ""
@@ -552,6 +685,7 @@ def evaluate_quota_headroom(
     region: str,
     target_quota_family: str,
     needed_vcpus: int,
+    fleet_needed_vcpus: Optional[int] = None,
 ) -> str:
     """Return a concise regional vCPU quota readiness status for the target modern SKU family."""
     sub_l = (subscription_id or "").strip().lower()
@@ -563,11 +697,14 @@ def evaluate_quota_headroom(
     if usage is None:
         return ""
     avail = usage.available
+    total_needed = max(needed_vcpus, fleet_needed_vcpus or 0)
     if usage.limit == 0:
         return f"Quota 0/{usage.limit} ({usage.family_name})"
-    if avail >= needed_vcpus:
-        return f"Quota OK ({avail} free / {usage.limit} limit)"
-    return f"Quota Increase Needed (needs {needed_vcpus}, {avail} free / {usage.limit})"
+    if needed_vcpus > avail:
+        return f"Quota Increase Needed (needs {needed_vcpus}, {avail} free / {usage.limit})"
+    if total_needed > avail:
+        return f"Quota Increase Needed (fleet needs {total_needed}, {avail} free / {usage.limit})"
+    return f"Quota OK ({avail} free / {usage.limit} limit)"
 
 
 def fetch_vm_schedules(
@@ -680,6 +817,15 @@ def infer_workload_and_schedule(
     return deployment_kind, " · ".join(sched_parts), inferred_hours
 
 
+def _norm_billing_month(raw: Any) -> str:
+    """Normalise '2026-10-01T00:00:00', '2026-10', or integer '202610' to '2026-10'."""
+    text = str(raw or "").strip()
+    digits = re.sub(r"\D", "", text)
+    if len(digits) >= 6:
+        return f"{digits[:4]}-{digits[4:6]}"
+    return text[:7]
+
+
 def fetch_subscription_actual_costs(
     client: ArmClient,
     subscription_id: str,
@@ -687,6 +833,7 @@ def fetch_subscription_actual_costs(
     window: BillingWindow,
     *,
     api_version: str = "2023-11-01",
+    instance_counts_by_rid: Optional[Mapping[str, int]] = None,
 ) -> Tuple[Dict[str, ActualVmUsage], Optional[str]]:
     """Query Azure Cost Management for ``resource_ids`` in ``subscription_id`` over ``window``.
 
@@ -751,7 +898,7 @@ def fetch_subscription_actual_costs(
 
         _accumulate_cost_rows(reply, usage_map, window)
 
-    _finalise_extrapolation(usage_map, window)
+    _finalise_extrapolation(usage_map, window, instance_counts_by_rid=instance_counts_by_rid)
     return usage_map, None
 
 
@@ -792,33 +939,50 @@ def _accumulate_cost_rows(
             qty = float(row[i_qty] or 0.0)
         except (TypeError, ValueError):
             qty = 0.0
-        bmonth = str(row[i_month] or "").strip()
+        bmonth = _norm_billing_month(row[i_month])
         mcat = str(row[i_cat] or "").strip().lower()
         if i_cur < len(row) and row[i_cur]:
             entry.currency = str(row[i_cur]).strip().upper()
+        entry.matched_rows += 1
 
         is_compute_meter = mcat == "virtual machines"
-        if bmonth.startswith(window.last_month_prefix):
+        if bmonth == window.last_month_prefix:
             entry.last_month_cost = round(entry.last_month_cost + cost, 4)
             if is_compute_meter:
                 entry.last_month_hours = round(entry.last_month_hours + qty, 2)
-        elif bmonth.startswith(window.current_month_prefix):
+        elif bmonth == window.current_month_prefix:
             entry.mtd_cost = round(entry.mtd_cost + cost, 4)
             if is_compute_meter:
                 entry.mtd_hours = round(entry.mtd_hours + qty, 2)
 
 
-def _finalise_extrapolation(usage_map: Dict[str, ActualVmUsage], window: BillingWindow) -> None:
+def _finalise_extrapolation(
+    usage_map: Dict[str, ActualVmUsage],
+    window: BillingWindow,
+    *,
+    instance_counts_by_rid: Optional[Mapping[str, int]] = None,
+) -> None:
     # Cost Management has an ~8-24h ingestion lag, so observe the max single-VM MTD hours when possible
     # so a 24/7 VM in the current month extrapolates accurately to a full month.
-    observed_single_vm_hours = [
-        u.mtd_hours for u in usage_map.values() if 24.0 <= u.mtd_hours <= window.current_month_hours
-    ]
-    effective_elapsed = (
-        max(observed_single_vm_hours)
-        if observed_single_vm_hours
-        else window.elapsed_current_hours
-    )
+    # Exclude multi-instance scale sets from single-VM elapsed-hour inference (or normalise by instance count)
+    # so a 10-node VMSS early in the month cannot masquerade as 10x elapsed wall-clock hours.
+    inst_map = {k.lower(): max(1, int(v)) for k, v in (instance_counts_by_rid or {}).items()}
+    single_vm_hours: List[float] = []
+    scaled_pool_hours: List[float] = []
+    for rid, u in usage_map.items():
+        if u.mtd_hours <= 0:
+            continue
+        inst = inst_map.get(rid.lower(), 1)
+        if inst == 1 and ("/virtualmachinescalesets/" not in rid.lower()):
+            if 24.0 <= u.mtd_hours <= window.current_month_hours:
+                single_vm_hours.append(u.mtd_hours)
+        elif inst >= 1:
+            per_node = u.mtd_hours / float(inst)
+            if 24.0 <= per_node <= window.current_month_hours:
+                scaled_pool_hours.append(per_node)
+
+    observed_hours = single_vm_hours or scaled_pool_hours
+    effective_elapsed = max(observed_hours) if observed_hours else window.elapsed_current_hours
     effective_elapsed = max(24.0, min(effective_elapsed, window.current_month_hours))
     scale = window.current_month_hours / effective_elapsed if effective_elapsed > 0 else 1.0
 

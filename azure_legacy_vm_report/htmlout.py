@@ -10,7 +10,7 @@ from typing import List, Optional
 from .collect import LEVEL_ERROR, LEVEL_INFO, LEVEL_WARNING
 from .dates import format_datetime
 from .model import POWER_DEALLOCATED, TYPE_VMSS
-from .pricing import POLICY_SERVICE_HEALTH
+from .pricing import POLICY_SERVICE_HEALTH, REGIONAL_FEB_2027_HIKES
 from .report import GenerationSummary, Report, TenantReport
 from .textfmt import (
     clean_text,
@@ -47,6 +47,18 @@ p{margin:0}
 .hpill.bad{background:rgba(255,92,122,.13);border-color:rgba(255,92,122,.4);color:#ff8fa3}
 .hpill.ok{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.4);color:#66e8b1}
 .hpill.warn{background:rgba(255,180,84,.13);border-color:rgba(255,180,84,.4);color:#ffc97e}
+.brief-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px}
+.bcard{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.022);display:flex;flex-direction:column;gap:3px}
+.bcard .bk{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.065em;color:var(--muted)}
+.bcard .bv{font-size:18px;font-weight:750;color:var(--text);line-height:1.2;font-variant-numeric:tabular-nums}
+.bcard .bs{font-size:12.5px;color:var(--muted);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.adv{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+details.adv>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);user-select:none;list-style:none;display:inline-flex;align-items:center;gap:6px}
+details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary::before{content:"\\25B8";display:inline-block;color:var(--accent);transition:transform .15s}
+details.adv[open]>summary::before{transform:rotate(90deg)}
+details.adv>summary:hover{color:var(--text)}
+details.adv .adv-body{margin-top:8px}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
 .tgroup{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:13.5px;cursor:pointer;user-select:none}
@@ -82,12 +94,14 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
 .scroll.has-overflow-right{box-shadow:inset -18px 0 16px -12px rgba(180,85,255,.35)}
 .scroll.has-overflow-left{box-shadow:inset 18px 0 16px -12px rgba(180,85,255,.35)}
 .scroll.has-overflow-left.has-overflow-right{box-shadow:inset 18px 0 16px -12px rgba(180,85,255,.35),inset -18px 0 16px -12px rgba(180,85,255,.35)}
-table{width:100%;border-collapse:collapse;font-size:14.5px}
-th,td{padding:8px 10px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line);vertical-align:middle}
-td.wrap{white-space:normal;min-width:150px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+table.vm-tbl{font-size:13.5px}
+th,td{padding:7px 7px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line);vertical-align:middle}
+table.vm-tbl th,table.vm-tbl td{padding:6px 5.5px}
+td.wrap{white-space:normal}
 th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
-th{color:var(--muted);font-weight:650;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
-thead tr.group-head th{padding:6px 10px;font-size:12px;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.14)}
+th{color:var(--muted);font-weight:650;font-size:11.5px;line-height:1.25;text-transform:uppercase;letter-spacing:.035em;white-space:normal;vertical-align:bottom}
+thead tr.group-head th{padding:6px 7px;font-size:11.5px;letter-spacing:.05em;white-space:normal;vertical-align:middle;border-bottom:1px solid rgba(255,255,255,.14)}
 th.g-today{color:var(--text);background:rgba(255,255,255,.03);border-left:1px solid var(--line)}
 th.g-stay{color:#ff8fa3;background:rgba(255,92,122,.07);border-left:1px solid rgba(255,92,122,.25)}
 th.g-mig{color:#66e8b1;background:rgba(61,220,151,.07);border-left:1px solid rgba(61,220,151,.25)}
@@ -100,16 +114,19 @@ th[aria-sort=ascending] button::after{content:" \\25B2";color:var(--accent)}
 th[aria-sort=descending] button::after{content:" \\25BC";color:var(--accent)}
 tbody tr:hover td{background:rgba(180,85,255,.07)}
 tr.total-row td{font-weight:700;border-top:2px solid var(--line)}
-.cell-main{display:block;font-size:14.5px;font-weight:600;color:var(--text)}
-.cell-sub{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;white-space:normal;max-width:340px;line-height:1.35}
-.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12.5px;border:1px solid currentColor;line-height:1.5}
+.cell-main{display:block;font-size:14px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.cell-sub{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:normal;max-width:280px;line-height:1.3}
+.badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;border:1px solid currentColor;line-height:1.45;white-space:nowrap}
 .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.dim{color:var(--muted)}.accent{color:var(--accent)}
-.gen-v1{color:var(--bad)}.gen-v2{color:var(--warn)}.gen-v3{color:var(--accent2)}
+.gen-inline{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gen-inline .meta{font-size:12.5px}
+.gen-v1{color:var(--bad)}.gen-v2{color:var(--warn)}.gen-v3{color:var(--accent2)}.gen-v4,.gen-v5,.gen-v6{color:var(--accent)}
 .note{padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .note:last-child{border-bottom:0}
 .empty{color:var(--muted);padding:8px 0}
 footer{color:var(--muted);font-size:13px;text-align:center}
-@media (max-width:960px){.hero{grid-template-columns:1fr}}
+@media (max-width:1360px){.brief-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:960px){.hero,.brief-grid{grid-template-columns:1fr}}
 """
 
 SCRIPT = """
@@ -200,14 +217,28 @@ SCRIPT = """
     if (!table) { return; }
     var searchInput = document.querySelector('input[data-filter="' + tableId + '"]');
     var genSelect = document.querySelector('select[data-gen-filter="' + tableId + '"]');
+    var hikedOnlyCb = document.querySelector('input[data-hiked-filter="' + tableId + '"]');
+    var activeOnlyCb = document.querySelector('input[data-active-filter="' + tableId + '"]');
+    var countBadge = document.querySelector('[data-count-for="' + tableId + '"]');
     var query = searchInput ? searchInput.value.trim().toLowerCase() : '';
     var gen = genSelect ? genSelect.value : '';
+    var hikedOnly = hikedOnlyCb && hikedOnlyCb.checked;
+    var activeOnly = activeOnlyCb && activeOnlyCb.checked;
+    var shown = 0, total = table.tBodies[0].rows.length;
     Array.prototype.forEach.call(table.tBodies[0].rows, function (row) {
       var rowGen = row.getAttribute('data-gen') || '';
       var matchGen = !gen || rowGen === gen;
       var matchText = !query || row.textContent.toLowerCase().indexOf(query) !== -1;
-      row.hidden = !(matchGen && matchText);
+      var rowDelta = parseFloat(row.getAttribute('data-live-delta') || '0');
+      var matchHiked = !hikedOnly || Math.abs(rowDelta) > 0.005;
+      var matchActive = !activeOnly || row.getAttribute('data-billed') === '1';
+      var vis = matchGen && matchText && matchHiked && matchActive;
+      row.hidden = !vis;
+      if (vis) { shown += 1; }
     });
+    if (countBadge) {
+      countBadge.textContent = shown === total ? (total + ' items') : (shown + ' of ' + total);
+    }
   }
 
   document.querySelectorAll('input[data-filter]').forEach(function (input) {
@@ -217,6 +248,10 @@ SCRIPT = """
   document.querySelectorAll('select[data-gen-filter]').forEach(function (sel) {
     var id = sel.getAttribute('data-gen-filter');
     sel.addEventListener('change', function () { applyFilters(id); });
+  });
+  document.querySelectorAll('input[data-hiked-filter], input[data-active-filter]').forEach(function (cb) {
+    var id = cb.getAttribute('data-hiked-filter') || cb.getAttribute('data-active-filter');
+    cb.addEventListener('change', function () { applyFilters(id); });
   });
 
   var simPanel = document.getElementById('hike-simulator');
@@ -228,9 +263,7 @@ SCRIPT = """
   var costSourceSelect = document.getElementById('sim-cost-source');
   var deallocCheck = document.getElementById('sim-dealloc');
   var targetTierSelect = document.getElementById('sim-target-tier');
-  var migV1Check = document.getElementById('sim-mig-v1');
-  var migV2Check = document.getElementById('sim-mig-v2');
-  var migV3Check = document.getElementById('sim-mig-v3');
+  var genMigChecks = simPanel.querySelectorAll('input.gen-mig-check');
   var shutIdleCheck = document.getElementById('sim-shut-idle');
   var modeButtons = simPanel.querySelectorAll('button[data-mode]');
   var presetButtons = simPanel.querySelectorAll('button[data-mig-preset]');
@@ -252,8 +285,19 @@ SCRIPT = """
   }
 
   function fmtDeltaAndPct(delta, base) {
+    if (Math.abs(delta) < 0.005) { return 'No hike (' + sym + '0)'; }
     var pct = base > 0 ? (delta / base) * 100 : 0;
     return fmtMoney(delta, true) + ' (' + fmtPct(pct) + ')';
+  }
+
+  function fmtNetVsStay(deltaVsFeb, feb) {
+    if (Math.abs(deltaVsFeb) < 0.005) { return 'No change (' + sym + '0)'; }
+    var pct = feb > 0 ? Math.abs((deltaVsFeb / feb) * 100) : 0;
+    var pctStr = (Math.abs(pct - Math.round(pct)) < 0.05 ? Math.round(pct) : pct.toFixed(1)) + '%';
+    if (deltaVsFeb < 0) {
+      return 'Saves ' + fmtMoney(-deltaVsFeb, false) + ' (-' + pctStr + ')';
+    }
+    return fmtMoney(deltaVsFeb, true) + ' (+' + pctStr + ')';
   }
 
   function buildPlainBreakdown(legSku, tgtSku, hikePct, pctVsCur, pctVsFeb, deltaVsCur, deltaVsFeb) {
@@ -308,17 +352,20 @@ SCRIPT = """
     return includeDealloc ? provCur : 0;
   }
 
-  function resolveTargetRatio(row, tier) {
-    if (tier === 'v6-payg') {
-      return parseFloat(row.getAttribute('data-v6-ratio') || row.getAttribute('data-v5-ratio') || '1');
-    }
-    if (tier === 'v5-ri') {
-      return parseFloat(row.getAttribute('data-v5-ri-ratio') || '0.55');
-    }
-    if (tier === 'v6-ri') {
-      return parseFloat(row.getAttribute('data-v6-ri-ratio') || row.getAttribute('data-v5-ri-ratio') || '0.58');
-    }
-    return parseFloat(row.getAttribute('data-v5-ratio') || '1');
+  function computeCandidateCosts(row, cur, tier) {
+    var v5Ratio = parseFloat(row.getAttribute('data-v5-ratio') || '1');
+    var v6Ratio = parseFloat(row.getAttribute('data-v6-ratio') || String(v5Ratio));
+    var v5Ri24x7 = parseFloat(row.getAttribute('data-v5-ri-24x7') || '0');
+    var v6Ri24x7 = parseFloat(row.getAttribute('data-v6-ri-24x7') || String(v5Ri24x7));
+    var paygV5 = cur * v5Ratio;
+    var paygV6 = cur * v6Ratio;
+    var riV5 = cur > 0 ? (v5Ri24x7 > 0 ? Math.min(paygV5, v5Ri24x7) : paygV5 * 0.55) : 0;
+    var riV6 = cur > 0 ? (v6Ri24x7 > 0 ? Math.min(paygV6, v6Ri24x7) : paygV6 * 0.55) : 0;
+    var isV6 = (tier === 'v6-payg' || tier === 'v6-ri');
+    var candMo = tier === 'v6-payg' ? paygV6 : (tier === 'v5-ri' ? riV5 : (tier === 'v6-ri' ? riV6 : paygV5));
+    var candRiMo = isV6 ? riV6 : riV5;
+    var baseRatio = isV6 ? v6Ratio : v5Ratio;
+    return { candMo: candMo, candRiMo: candRiMo, baseRatio: baseRatio };
   }
 
   function resolveTargetSkuName(row, tier) {
@@ -328,6 +375,56 @@ SCRIPT = """
     if (tier === 'v5-ri') { return v5Sku + ' (3Y RI)'; }
     if (tier === 'v6-ri') { return v6Sku + ' (3Y RI)'; }
     return v5Sku;
+  }
+
+  function resolveHikePct(row, gen, v1Pct, v2Pct, v3Pct) {
+    var shPct = parseFloat(row.getAttribute('data-sh-pct') || '0');
+    var regPct = parseFloat(row.getAttribute('data-reg-pct') || '0');
+    if (currentMode === 'service-health') {
+      return shPct;
+    }
+    if (currentMode === 'legacy-25') {
+      return (gen === 'v1' || gen === 'v2' || gen === 'v3') ? v1Pct : regPct;
+    }
+    if (gen === 'v1') { return v1Pct; }
+    if (gen === 'v2') { return v2Pct; }
+    if (gen === 'v3') { return v3Pct; }
+    return regPct;
+  }
+
+  function syncParentCheckboxes() {
+    document.querySelectorAll('tr.sku-summary-row').forEach(function (srow) {
+      var sCb = srow.querySelector('input.sku-mig-check');
+      if (!sCb) { return; }
+      var sku = sCb.getAttribute('data-sku') || '';
+      var tenant = sCb.getAttribute('data-tenant') || '';
+      var total = 0, checked = 0;
+      document.querySelectorAll('tr.vm-row').forEach(function (r) {
+        if (r.getAttribute('data-sku') === sku && r.getAttribute('data-tenant') === tenant) {
+          var cb = r.querySelector('input.vm-mig-check');
+          if (cb) {
+            total += 1;
+            if (cb.checked) { checked += 1; }
+          }
+        }
+      });
+      if (total > 0) {
+        sCb.checked = checked > 0;
+        sCb.indeterminate = checked > 0 && checked < total;
+      }
+    });
+    genMigChecks.forEach(function (gCb) {
+      var gen = gCb.getAttribute('data-gen') || '';
+      var boxes = document.querySelectorAll('tr.vm-row[data-gen="' + gen + '"] input.vm-mig-check');
+      var total = boxes.length, checked = 0;
+      Array.prototype.forEach.call(boxes, function (cb) {
+        if (cb.checked) { checked += 1; }
+      });
+      if (total > 0) {
+        gCb.checked = checked > 0;
+        gCb.indeterminate = checked > 0 && checked < total;
+      }
+    });
   }
 
   function recalc() {
@@ -343,56 +440,50 @@ SCRIPT = """
     if (!vmRows.length) { return; }
 
     var genStats = {
-      v1: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 },
-      v2: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 },
-      v3: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 },
-      v4: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 },
-      v5: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 },
-      v6: { cur: 0, feb: 0, v5: 0, v5ri: 0, blended: 0 }
+      v1: { cur: 0, feb: 0, plan: 0, planRi: 0 },
+      v2: { cur: 0, feb: 0, plan: 0, planRi: 0 },
+      v3: { cur: 0, feb: 0, plan: 0, planRi: 0 },
+      v4: { cur: 0, feb: 0, plan: 0, planRi: 0 },
+      v5: { cur: 0, feb: 0, plan: 0, planRi: 0 },
+      v6: { cur: 0, feb: 0, plan: 0, planRi: 0 }
     };
     var skuStats = {};
     var subStats = {};
+    var mgStats = {};
     var waveStats = {};
-    var totalCur = 0, totalFeb = 0, totalV5 = 0, totalV5Ri = 0, totalBlended = 0;
+    var totalCur = 0, totalFeb = 0, totalPlan = 0, totalPlanRi = 0;
     var migratedCount = 0, stayedCount = 0, idleShutCount = 0;
 
     vmRows.forEach(function (row) {
       var gen = row.getAttribute('data-gen') || 'v3';
       var sku = row.getAttribute('data-sku') || '';
       var sub = row.getAttribute('data-sub') || '';
+      var mg = row.getAttribute('data-mg') || 'Tenant Root';
       var wave = row.getAttribute('data-wave') || '';
       var tenant = row.getAttribute('data-tenant') || '';
-      var shPct = parseFloat(row.getAttribute('data-sh-pct') || '0');
       var instCount = parseInt(row.getAttribute('data-inst') || '1', 10) || 1;
       var isIdle = row.getAttribute('data-idle') === '1';
       var vmCheck = row.querySelector('input.vm-mig-check');
       var isMigrated = vmCheck ? vmCheck.checked : true;
 
       var cur = resolveBaseline(row, costSource, includeDealloc);
-      var pct = 0;
-      if (currentMode === 'service-health') {
-        pct = shPct;
-      } else {
-        pct = gen === 'v1' ? v1Pct : (gen === 'v2' ? v2Pct : v3Pct);
-      }
+      var pct = resolveHikePct(row, gen, v1Pct, v2Pct, v3Pct);
       var feb = cur * (1 + pct / 100);
       var delta = feb - cur;
+      row.setAttribute('data-live-delta', delta.toFixed(2));
 
-      var tgtRatio = resolveTargetRatio(row, tier);
-      var v5RiRatio = parseFloat(row.getAttribute('data-v5-ri-ratio') || '0.55');
-      var tgtMo = cur * tgtRatio;
-      var v5RiMo = cur * v5RiRatio;
-      if (shutIdle && isIdle) {
-        tgtMo = 0;
-        v5RiMo = 0;
-      }
+      var costs = computeCandidateCosts(row, cur, tier);
+      var candMo = costs.candMo;
+      var candRiMo = costs.candRiMo;
 
-      var deltaVsCur = tgtMo - cur;
-      var pctVsCur = cur > 0 ? (deltaVsCur / cur) * 100 : ((tgtRatio - 1) * 100);
-      var deltaVsFeb = tgtMo - feb;
+      var planMo = (shutIdle && isIdle) ? 0 : (isMigrated ? candMo : feb);
+      var planRiMo = (shutIdle && isIdle) ? 0 : (isMigrated ? candRiMo : feb);
+
+      var deltaVsCur = planMo - cur;
+      var pctVsCur = cur > 0 ? (deltaVsCur / cur) * 100 : (isMigrated ? (costs.baseRatio - 1) * 100 : pct);
+      var deltaVsFeb = planMo - feb;
       var pctVsFeb = feb > 0 ? (deltaVsFeb / feb) * 100 : 0;
-      var saveVsFeb = feb - tgtMo;
-      var chosenMo = (shutIdle && isIdle) ? 0 : (isMigrated ? tgtMo : feb);
+      var saveVsFeb = feb - planMo;
 
       if (shutIdle && isIdle) {
         idleShutCount += instCount;
@@ -402,70 +493,84 @@ SCRIPT = """
         stayedCount += instCount;
       }
 
-      var tgtSkuLabel = resolveTargetSkuName(row, tier);
+      var baseTgtLabel = resolveTargetSkuName(row, tier);
+      var tgtSkuLabel = (shutIdle && isIdle)
+        ? 'Stop Idle VM'
+        : (isMigrated ? baseTgtLabel : (sku + ' (Stay)'));
+
       var curCell = row.querySelector('[data-col="cur"]');
       var febCell = row.querySelector('[data-col="feb"]');
       var deltaCell = row.querySelector('[data-col="delta"]');
       var pctCell = row.querySelector('[data-col="pct"]');
       var tgtSkuCell = row.querySelector('[data-col="tgtsku"]');
       var v5Cell = row.querySelector('[data-col="v5"]');
+      var migSubEl = row.querySelector('[data-col="migsub"]');
       var migCurCell = row.querySelector('[data-col="migcur"]');
       var v5SaveCell = row.querySelector('[data-col="v5save"]');
       var breakdownCell = row.querySelector('[data-col="breakdown"]');
 
       if (curCell) { curCell.textContent = fmtMoney(cur, false); curCell.setAttribute('data-sort', cur.toFixed(2)); }
       if (febCell) { febCell.textContent = fmtMoney(feb, false); febCell.setAttribute('data-sort', feb.toFixed(2)); }
-      if (deltaCell) { deltaCell.textContent = fmtMoney(delta, true); deltaCell.setAttribute('data-sort', delta.toFixed(2)); }
+      if (deltaCell) {
+        deltaCell.textContent = fmtDeltaAndPct(delta, cur);
+        deltaCell.setAttribute('data-sort', delta.toFixed(2));
+        deltaCell.className = 'num ' + (delta > 0.005 ? 'bad' : 'dim');
+      }
       if (pctCell) { pctCell.textContent = fmtPct(pct); pctCell.setAttribute('data-sort', pct.toFixed(2)); }
       if (tgtSkuCell) { tgtSkuCell.textContent = tgtSkuLabel; }
-      if (v5Cell) { v5Cell.textContent = fmtMoney(tgtMo, false); v5Cell.setAttribute('data-sort', tgtMo.toFixed(2)); }
+      if (v5Cell) {
+        var v5Main = v5Cell.querySelector('.cell-main');
+        if (v5Main) { v5Main.textContent = fmtMoney(planMo, false); }
+        else { v5Cell.textContent = fmtMoney(planMo, false); }
+        v5Cell.setAttribute('data-sort', planMo.toFixed(2));
+      }
+      if (migSubEl) {
+        migSubEl.textContent = Math.abs(deltaVsCur) > 0.005 ? ('vs Today: ' + fmtMoney(deltaVsCur, true)) : '';
+      }
       if (migCurCell) {
         migCurCell.textContent = fmtDeltaAndPct(deltaVsCur, cur);
         migCurCell.setAttribute('data-sort', deltaVsCur.toFixed(2));
         migCurCell.className = 'num ' + (deltaVsCur < -0.01 ? 'ok' : (deltaVsCur > 0.01 ? 'warn' : 'dim'));
       }
       if (v5SaveCell) {
-        v5SaveCell.textContent = fmtDeltaAndPct(deltaVsFeb, feb);
+        v5SaveCell.textContent = fmtNetVsStay(deltaVsFeb, feb);
         v5SaveCell.setAttribute('data-sort', saveVsFeb.toFixed(2));
         v5SaveCell.className = 'num ' + (deltaVsFeb < -0.01 ? 'ok' : (deltaVsFeb > 0.01 ? 'bad' : 'dim'));
       }
       if (breakdownCell) {
-        breakdownCell.textContent = buildPlainBreakdown(sku, tgtSkuLabel, pct, pctVsCur, pctVsFeb, deltaVsCur, deltaVsFeb);
+        breakdownCell.textContent = buildPlainBreakdown(sku, baseTgtLabel, pct, pctVsCur, pctVsFeb, deltaVsCur, deltaVsFeb);
       }
 
       if (genStats[gen]) {
         genStats[gen].cur += cur; genStats[gen].feb += feb;
-        genStats[gen].v5 += tgtMo; genStats[gen].v5ri += v5RiMo;
-        genStats[gen].blended += chosenMo;
+        genStats[gen].plan += planMo; genStats[gen].planRi += planRiMo;
       }
-      totalCur += cur; totalFeb += feb; totalV5 += tgtMo; totalV5Ri += v5RiMo; totalBlended += chosenMo;
+      totalCur += cur; totalFeb += feb; totalPlan += planMo; totalPlanRi += planRiMo;
 
       var skuKey = tenant + '|' + sku;
-      if (!skuStats[skuKey]) { skuStats[skuKey] = { cur: 0, feb: 0, v5: 0, pct: pct }; }
-      skuStats[skuKey].cur += cur; skuStats[skuKey].feb += feb; skuStats[skuKey].v5 += tgtMo;
+      if (!skuStats[skuKey]) { skuStats[skuKey] = { cur: 0, feb: 0, plan: 0, pct: pct }; }
+      skuStats[skuKey].cur += cur; skuStats[skuKey].feb += feb; skuStats[skuKey].plan += planMo;
 
       var subKey = tenant + '|' + sub;
-      if (!subStats[subKey]) { subStats[subKey] = { cur: 0, feb: 0, v5: 0 }; }
-      subStats[subKey].cur += cur; subStats[subKey].feb += feb; subStats[subKey].v5 += tgtMo;
+      if (!subStats[subKey]) { subStats[subKey] = { cur: 0, feb: 0, plan: 0 }; }
+      subStats[subKey].cur += cur; subStats[subKey].feb += feb; subStats[subKey].plan += planMo;
+
+      var mgKey = tenant + '|' + mg;
+      if (!mgStats[mgKey]) { mgStats[mgKey] = { cur: 0, feb: 0, plan: 0 }; }
+      mgStats[mgKey].cur += cur; mgStats[mgKey].feb += feb; mgStats[mgKey].plan += planMo;
 
       var waveKey = tenant + '|' + wave;
-      if (!waveStats[waveKey]) { waveStats[waveKey] = { cur: 0, feb: 0, v5: 0, v5ri: 0 }; }
+      if (!waveStats[waveKey]) { waveStats[waveKey] = { cur: 0, feb: 0, plan: 0, planRi: 0 }; }
       waveStats[waveKey].cur += cur; waveStats[waveKey].feb += feb;
-      waveStats[waveKey].v5 += tgtMo; waveStats[waveKey].v5ri += v5RiMo;
+      waveStats[waveKey].plan += planMo; waveStats[waveKey].planRi += planRiMo;
     });
 
     var totalDelta = totalFeb - totalCur;
     var totalYrDelta = totalDelta * 12;
     var totalPct = totalCur > 0 ? (totalDelta / totalCur) * 100 : 0;
-    var totalV5Save = totalFeb - totalV5;
-    var totalV5RiSave = totalFeb - totalV5Ri;
-    var totalMigVsCur = totalV5 - totalCur;
-    var totalMigVsCurPct = totalCur > 0 ? (totalMigVsCur / totalCur) * 100 : 0;
-    var totalMigVsFeb = totalV5 - totalFeb;
-    var totalMigVsFebPct = totalFeb > 0 ? (totalMigVsFeb / totalFeb) * 100 : 0;
-    var blendedVsCur = totalBlended - totalCur;
+    var blendedVsCur = totalPlan - totalCur;
     var blendedVsCurPct = totalCur > 0 ? (blendedVsCur / totalCur) * 100 : 0;
-    var blendedVsFeb = totalBlended - totalFeb;
+    var blendedVsFeb = totalPlan - totalFeb;
     var blendedVsFebPct = totalFeb > 0 ? (blendedVsFeb / totalFeb) * 100 : 0;
 
     var kpiCur = document.getElementById('kpi-current-mo');
@@ -486,10 +591,10 @@ SCRIPT = """
     if (kpiDelta) { kpiDelta.textContent = 'vs Today: ' + fmtMoney(totalDelta, true) + '/mo (' + fmtPct(totalPct) + ')'; }
     if (kpiYr) { kpiYr.textContent = fmtMoney(totalYrDelta, true) + ' / yr hike'; }
 
-    if (kpiPlanMo) { kpiPlanMo.textContent = fmtMoney(totalBlended, false) + ' / mo'; }
+    if (kpiPlanMo) { kpiPlanMo.textContent = fmtMoney(totalPlan, false) + ' / mo'; }
     if (kpiPlanYr) {
       var idleSuffix = idleShutCount > 0 ? (' · ' + idleShutCount + ' idle stopped') : '';
-      kpiPlanYr.textContent = fmtMoney(totalBlended * 12, false) + ' / yr · ' + migratedCount + ' migrated, ' + stayedCount + ' staying' + idleSuffix;
+      kpiPlanYr.textContent = fmtMoney(totalPlan * 12, false) + ' / yr · ' + migratedCount + ' migrated, ' + stayedCount + ' staying' + idleSuffix;
     }
     if (kpiPlanVsCur) {
       kpiPlanVsCur.textContent = 'vs Today: ' + fmtMoney(blendedVsCur, true) + '/mo (' + fmtPct(blendedVsCurPct) + ')';
@@ -502,11 +607,11 @@ SCRIPT = """
 
     document.querySelectorAll('tr.gen-summary-row').forEach(function (row) {
       var g = row.getAttribute('data-gen-summary');
-      var st = g === 'Total' ? { cur: totalCur, feb: totalFeb, v5: totalV5, v5ri: totalV5Ri } : genStats[g];
+      var st = g === 'Total' ? { cur: totalCur, feb: totalFeb, plan: totalPlan, planRi: totalPlanRi } : genStats[g];
       if (!st) { return; }
       var d = st.feb - st.cur;
-      var mCur = st.v5 - st.cur;
-      var mFeb = st.v5 - st.feb;
+      var mCur = st.plan - st.cur;
+      var mFeb = st.plan - st.feb;
       var cEl = row.querySelector('[data-col="cur"]');
       var fEl = row.querySelector('[data-col="feb"]');
       var dEl = row.querySelector('[data-col="delta"]');
@@ -516,11 +621,20 @@ SCRIPT = """
       var v5riEl = row.querySelector('[data-col="v5ri"]');
       if (cEl) { cEl.textContent = fmtMoney(st.cur, false); }
       if (fEl) { fEl.textContent = fmtMoney(st.feb, false); }
-      if (dEl) { dEl.textContent = fmtDeltaAndPct(d, st.cur); }
-      if (v5El) { v5El.textContent = fmtMoney(st.v5, false); }
-      if (mCurEl) { mCurEl.textContent = fmtDeltaAndPct(mCur, st.cur); }
-      if (v5sEl) { v5sEl.textContent = fmtDeltaAndPct(mFeb, st.feb); }
-      if (v5riEl) { v5riEl.textContent = fmtMoney(st.v5ri, false); }
+      if (dEl) {
+        dEl.textContent = fmtDeltaAndPct(d, st.cur);
+        dEl.className = 'num ' + (d > 0.005 ? 'bad' : 'dim');
+      }
+      if (v5El) { v5El.textContent = fmtMoney(st.plan, false); }
+      if (mCurEl) {
+        mCurEl.textContent = fmtDeltaAndPct(mCur, st.cur);
+        mCurEl.className = 'num ' + (mCur < -0.01 ? 'ok' : (mCur > 0.01 ? 'warn' : 'dim'));
+      }
+      if (v5sEl) {
+        v5sEl.textContent = fmtNetVsStay(mFeb, st.feb);
+        v5sEl.className = 'num ' + (mFeb < -0.01 ? 'ok' : (mFeb > 0.01 ? 'bad' : 'dim'));
+      }
+      if (v5riEl) { v5riEl.textContent = fmtMoney(st.planRi, false); }
     });
 
     document.querySelectorAll('tr.sku-summary-row').forEach(function (row) {
@@ -528,27 +642,40 @@ SCRIPT = """
       var st = skuStats[key];
       if (!st) { return; }
       var d = st.feb - st.cur;
-      var mCur = st.v5 - st.cur;
-      var mFeb = st.v5 - st.feb;
+      var mCur = st.plan - st.cur;
+      var mFeb = st.plan - st.feb;
       var cEl = row.querySelector('[data-col="cur"]');
       var fEl = row.querySelector('[data-col="feb"]');
       var dEl = row.querySelector('[data-col="delta"]');
       var yEl = row.querySelector('[data-col="yr"]');
       var v5El = row.querySelector('[data-col="v5"]');
+      var mSubEl = row.querySelector('[data-col="migsub"]');
       var mCurEl = row.querySelector('[data-col="migcur"]');
       var v5sEl = row.querySelector('[data-col="v5save"]');
       if (cEl) { cEl.textContent = fmtMoney(st.cur, false); cEl.setAttribute('data-sort', st.cur.toFixed(2)); }
       if (fEl) { fEl.textContent = fmtMoney(st.feb, false); fEl.setAttribute('data-sort', st.feb.toFixed(2)); }
-      if (dEl) { dEl.textContent = fmtDeltaAndPct(d, st.cur); dEl.setAttribute('data-sort', d.toFixed(2)); }
+      if (dEl) {
+        dEl.textContent = fmtDeltaAndPct(d, st.cur);
+        dEl.setAttribute('data-sort', d.toFixed(2));
+        dEl.className = 'num ' + (d > 0.005 ? 'bad' : 'dim');
+      }
       if (yEl) { yEl.textContent = fmtMoney(d * 12, true); yEl.setAttribute('data-sort', (d * 12).toFixed(2)); }
-      if (v5El) { v5El.textContent = fmtMoney(st.v5, false); v5El.setAttribute('data-sort', st.v5.toFixed(2)); }
+      if (v5El) {
+        var v5Main = v5El.querySelector('.cell-main');
+        if (v5Main) { v5Main.textContent = fmtMoney(st.plan, false); }
+        else { v5El.textContent = fmtMoney(st.plan, false); }
+        v5El.setAttribute('data-sort', st.plan.toFixed(2));
+      }
+      if (mSubEl) {
+        mSubEl.textContent = Math.abs(mCur) > 0.005 ? ('vs Today: ' + fmtMoney(mCur, true)) : '';
+      }
       if (mCurEl) {
         mCurEl.textContent = fmtDeltaAndPct(mCur, st.cur);
         mCurEl.setAttribute('data-sort', mCur.toFixed(2));
         mCurEl.className = 'num ' + (mCur < -0.01 ? 'ok' : (mCur > 0.01 ? 'warn' : 'dim'));
       }
       if (v5sEl) {
-        v5sEl.textContent = fmtDeltaAndPct(mFeb, st.feb);
+        v5sEl.textContent = fmtNetVsStay(mFeb, st.feb);
         v5sEl.setAttribute('data-sort', (-mFeb).toFixed(2));
         v5sEl.className = 'num ' + (mFeb < -0.01 ? 'ok' : (mFeb > 0.01 ? 'bad' : 'dim'));
       }
@@ -559,7 +686,7 @@ SCRIPT = """
       var st = subStats[key];
       if (!st) { return; }
       var d = st.feb - st.cur;
-      var mFeb = st.v5 - st.feb;
+      var mFeb = st.plan - st.feb;
       var cEl = row.querySelector('[data-col="cur"]');
       var fEl = row.querySelector('[data-col="feb"]');
       var dEl = row.querySelector('[data-col="delta"]');
@@ -568,18 +695,52 @@ SCRIPT = """
       var v5sEl = row.querySelector('[data-col="v5save"]');
       if (cEl) { cEl.textContent = fmtMoney(st.cur, false); cEl.setAttribute('data-sort', st.cur.toFixed(2)); }
       if (fEl) { fEl.textContent = fmtMoney(st.feb, false); fEl.setAttribute('data-sort', st.feb.toFixed(2)); }
-      if (dEl) { dEl.textContent = fmtDeltaAndPct(d, st.cur); dEl.setAttribute('data-sort', d.toFixed(2)); }
+      if (dEl) {
+        dEl.textContent = fmtDeltaAndPct(d, st.cur);
+        dEl.setAttribute('data-sort', d.toFixed(2));
+        dEl.className = 'num ' + (d > 0.005 ? 'bad' : 'dim');
+      }
       if (yEl) { yEl.textContent = fmtMoney(d * 12, true); yEl.setAttribute('data-sort', (d * 12).toFixed(2)); }
-      if (v5El) { v5El.textContent = fmtMoney(st.v5, false); v5El.setAttribute('data-sort', st.v5.toFixed(2)); }
-      if (v5sEl) { v5sEl.textContent = fmtDeltaAndPct(mFeb, st.feb); v5sEl.setAttribute('data-sort', (-mFeb).toFixed(2)); }
+      if (v5El) { v5El.textContent = fmtMoney(st.plan, false); v5El.setAttribute('data-sort', st.plan.toFixed(2)); }
+      if (v5sEl) {
+        v5sEl.textContent = fmtNetVsStay(mFeb, st.feb);
+        v5sEl.setAttribute('data-sort', (-mFeb).toFixed(2));
+        v5sEl.className = 'num ' + (mFeb < -0.01 ? 'ok' : (mFeb > 0.01 ? 'bad' : 'dim'));
+      }
+    });
+
+    document.querySelectorAll('tr.mg-summary-row').forEach(function (row) {
+      var key = row.getAttribute('data-mg-key');
+      var st = mgStats[key];
+      if (!st) { return; }
+      var d = st.feb - st.cur;
+      var mFeb = st.plan - st.feb;
+      var cEl = row.querySelector('[data-col="cur"]');
+      var fEl = row.querySelector('[data-col="feb"]');
+      var dEl = row.querySelector('[data-col="delta"]');
+      var v5El = row.querySelector('[data-col="v5"]');
+      var v5sEl = row.querySelector('[data-col="v5save"]');
+      if (cEl) { cEl.textContent = fmtMoney(st.cur, false); cEl.setAttribute('data-sort', st.cur.toFixed(2)); }
+      if (fEl) { fEl.textContent = fmtMoney(st.feb, false); fEl.setAttribute('data-sort', st.feb.toFixed(2)); }
+      if (dEl) {
+        dEl.textContent = fmtDeltaAndPct(d, st.cur);
+        dEl.setAttribute('data-sort', d.toFixed(2));
+        dEl.className = 'num ' + (d > 0.005 ? 'bad' : 'dim');
+      }
+      if (v5El) { v5El.textContent = fmtMoney(st.plan, false); v5El.setAttribute('data-sort', st.plan.toFixed(2)); }
+      if (v5sEl) {
+        v5sEl.textContent = fmtNetVsStay(mFeb, st.feb);
+        v5sEl.setAttribute('data-sort', (-mFeb).toFixed(2));
+        v5sEl.className = 'num ' + (mFeb < -0.01 ? 'ok' : (mFeb > 0.01 ? 'bad' : 'dim'));
+      }
     });
 
     document.querySelectorAll('tr.wave-summary-row').forEach(function (row) {
       var key = row.getAttribute('data-wave-key');
       var st = waveStats[key];
       if (!st) { return; }
-      var mCur = st.v5 - st.cur;
-      var mFeb = st.v5 - st.feb;
+      var mCur = st.plan - st.cur;
+      var mFeb = st.plan - st.feb;
       var cEl = row.querySelector('[data-col="cur"]');
       var fEl = row.querySelector('[data-col="feb"]');
       var v5El = row.querySelector('[data-col="v5"]');
@@ -588,10 +749,35 @@ SCRIPT = """
       var v5riEl = row.querySelector('[data-col="v5ri"]');
       if (cEl) { cEl.textContent = fmtMoney(st.cur, false); }
       if (fEl) { fEl.textContent = fmtMoney(st.feb, false); }
-      if (v5El) { v5El.textContent = fmtMoney(st.v5, false); }
-      if (mCurEl) { mCurEl.textContent = fmtDeltaAndPct(mCur, st.cur); }
-      if (v5sEl) { v5sEl.textContent = fmtDeltaAndPct(mFeb, st.feb); }
-      if (v5riEl) { v5riEl.textContent = fmtMoney(st.v5ri, false); }
+      if (v5El) { v5El.textContent = fmtMoney(st.plan, false); }
+      if (mCurEl) {
+        mCurEl.textContent = fmtDeltaAndPct(mCur, st.cur);
+        mCurEl.className = 'num ' + (mCur < -0.01 ? 'ok' : (mCur > 0.01 ? 'warn' : 'dim'));
+      }
+      if (v5sEl) {
+        v5sEl.textContent = fmtNetVsStay(mFeb, st.feb);
+        v5sEl.className = 'num ' + (mFeb < -0.01 ? 'ok' : (mFeb > 0.01 ? 'bad' : 'dim'));
+      }
+      if (v5riEl) { v5riEl.textContent = fmtMoney(st.planRi, false); }
+    });
+    var discValEl = document.getElementById('brief-disc-val');
+    var discSubEl = document.getElementById('brief-disc-sub');
+    if (discValEl && discSubEl) {
+      var origDiscVal = discValEl.getAttribute('data-orig-val') || '';
+      var origDiscSub = discSubEl.getAttribute('data-orig-sub') || '';
+      var origDiscCls = discValEl.getAttribute('data-orig-cls') || '';
+      if (costSource === 'retail' || costSource === 'retail-scheduled') {
+        discValEl.textContent = 'Retail PAYG';
+        discValEl.className = 'bv dim';
+        discSubEl.textContent = 'Public list rates selected';
+      } else {
+        discValEl.textContent = origDiscVal;
+        discValEl.className = origDiscCls;
+        discSubEl.textContent = origDiscSub;
+      }
+    }
+    document.querySelectorAll('table[id^="vms-"]').forEach(function (tbl) {
+      applyFilters(tbl.id);
     });
   }
 
@@ -599,15 +785,15 @@ SCRIPT = """
     document.querySelectorAll('tr.vm-row[data-gen="' + gen + '"] input.vm-mig-check').forEach(function (cb) {
       cb.checked = checked;
     });
-    document.querySelectorAll('tr.sku-summary-row[data-gen="' + gen + '"] input.sku-mig-check').forEach(function (cb) {
-      cb.checked = checked;
-    });
+    syncParentCheckboxes();
     recalc();
   }
 
-  if (migV1Check) { migV1Check.addEventListener('change', function () { syncGenChecksToRows('v1', migV1Check.checked); }); }
-  if (migV2Check) { migV2Check.addEventListener('change', function () { syncGenChecksToRows('v2', migV2Check.checked); }); }
-  if (migV3Check) { migV3Check.addEventListener('change', function () { syncGenChecksToRows('v3', migV3Check.checked); }); }
+  genMigChecks.forEach(function (gCb) {
+    gCb.addEventListener('change', function () {
+      syncGenChecksToRows(gCb.getAttribute('data-gen') || '', gCb.checked);
+    });
+  });
   if (targetTierSelect) { targetTierSelect.addEventListener('change', recalc); }
   if (shutIdleCheck) { shutIdleCheck.addEventListener('change', recalc); }
 
@@ -621,18 +807,24 @@ SCRIPT = """
           if (cb) { cb.checked = skuCb.checked; }
         }
       });
+      syncParentCheckboxes();
       recalc();
     });
   });
 
   document.querySelectorAll('input.vm-mig-check').forEach(function (vmCb) {
-    vmCb.addEventListener('change', recalc);
+    vmCb.addEventListener('change', function () {
+      syncParentCheckboxes();
+      recalc();
+    });
   });
 
   presetButtons.forEach(function (btn) {
     btn.addEventListener('click', function () {
       var preset = btn.getAttribute('data-mig-preset');
       var tier = targetTierSelect ? targetTierSelect.value : 'v5-payg';
+      var costSource = costSourceSelect ? costSourceSelect.value : 'auto';
+      var includeDealloc = deallocCheck && deallocCheck.checked;
       var v1Pct = parseFloat(v1Input.value) || 0;
       var v2Pct = parseFloat(v2Input.value) || 0;
       var v3Pct = parseFloat(v3Input.value) || 0;
@@ -647,25 +839,18 @@ SCRIPT = """
         } else if (preset === 'v1v2') {
           cb.checked = (gen === 'v1' || gen === 'v2');
         } else if (preset === 'cheaper-feb') {
-          var shPct = parseFloat(row.getAttribute('data-sh-pct') || '0');
-          var pct = currentMode === 'service-health' ? shPct : (gen === 'v1' ? v1Pct : (gen === 'v2' ? v2Pct : v3Pct));
-          var febMult = 1 + pct / 100;
-          var tgtRatio = resolveTargetRatio(row, tier);
-          cb.checked = (tgtRatio <= febMult + 0.0001);
+          var cur = resolveBaseline(row, costSource, includeDealloc);
+          var pct = resolveHikePct(row, gen, v1Pct, v2Pct, v3Pct);
+          var costs = computeCandidateCosts(row, cur, tier);
+          if (cur > 0) {
+            var feb = cur * (1 + pct / 100);
+            cb.checked = (costs.candMo <= feb + 0.005);
+          } else {
+            cb.checked = (costs.baseRatio <= (1 + pct / 100) + 0.0001);
+          }
         }
       });
-      document.querySelectorAll('tr.sku-summary-row').forEach(function (srow) {
-        var sCb = srow.querySelector('input.sku-mig-check');
-        if (!sCb) { return; }
-        var sGen = srow.getAttribute('data-gen') || 'v3';
-        if (preset === 'all') { sCb.checked = true; }
-        else if (preset === 'none') { sCb.checked = false; }
-        else if (preset === 'v1v2') { sCb.checked = (sGen === 'v1' || sGen === 'v2'); }
-        else { sCb.checked = true; }
-      });
-      if (migV1Check) { migV1Check.checked = (preset !== 'none'); }
-      if (migV2Check) { migV2Check.checked = (preset !== 'none'); }
-      if (migV3Check) { migV3Check.checked = (preset === 'all' || preset === 'cheaper-feb'); }
+      syncParentCheckboxes();
       recalc();
     });
   });
@@ -739,20 +924,194 @@ def _td(
     return f"<td{attrs}>{html or _e(text)}</td>"
 
 
-def _th(label: str, *, numeric: bool = False, sortable: bool = True) -> str:
+def _th(label: str, *, numeric: bool = False, sortable: bool = True, title: str = "") -> str:
     cls = ' class="num"' if numeric else ""
+    t_attr = f' title="{_e(title)}"' if title else ""
     inner = f'<button type="button">{_e(label)}</button>' if sortable else _e(label)
-    return f"<th{cls}>{inner}</th>"
+    return f"<th{cls}{t_attr}>{inner}</th>"
 
 
 def _badge(text: str, style: Optional[str]) -> str:
     return f'<span class="badge {style or "dim"}">{_e(text)}</span>'
 
 
-def _stat(value: object, label: str, *, value_id: str = "", cls: str = "") -> str:
-    id_attr = f' id="{_e(value_id)}"' if value_id else ""
-    cls_attr = f"n {cls}".strip()
-    return f'<div class="stat"><span class="{cls_attr}"{id_attr}>{_e(value)}</span><span class="l">{_e(label)}</span></div>'
+def _fmt_hike_cell(delta: float, pct: float, cur: str) -> str:
+    if abs(delta) < 0.005:
+        return f"No hike ({currency_symbol(cur)}0)"
+    return f"{format_money(delta, cur, signed=True)} ({format_pct(pct, signed=True)})"
+
+
+def _fmt_net_vs_stay(delta_vs_feb: float, pct_vs_feb: float, cur: str) -> str:
+    if abs(delta_vs_feb) < 0.005:
+        return f"No change ({currency_symbol(cur)}0)"
+    if delta_vs_feb < 0:
+        return f"Saves {format_money(-delta_vs_feb, cur)} ({format_pct(pct_vs_feb, signed=True)})"
+    return f"{format_money(delta_vs_feb, cur, signed=True)} ({format_pct(pct_vs_feb, signed=True)})"
+
+
+def _render_executive_brief(report: Report, cur: str) -> str:
+    recs = report.all_records()
+    if not recs:
+        return ""
+    sym = currency_symbol(cur)
+    zero_amt = f"{sym}0"
+    hiked_inst = sum(r.instance_count for r in recs if r.monthly_delta > 0.005)
+    zero_active_inst = sum(
+        r.instance_count for r in recs if r.monthly_delta <= 0.005 and r.power_state != POWER_DEALLOCATED
+    )
+    zero_off_inst = sum(
+        r.instance_count for r in recs if r.monthly_delta <= 0.005 and r.power_state == POWER_DEALLOCATED
+    )
+    zero_inst = zero_active_inst + zero_off_inst
+    total_inst = hiked_inst + zero_inst
+    total_hike = round(sum(r.monthly_delta for r in recs), 2)
+    total_cur = round(sum(r.current_monthly for r in recs), 2)
+
+    # Panel 1: Hike Exposure (compact KPI + tooltip breakdown)
+    if hiked_inst > 0:
+        p1_cls = "warn"
+        p1_val = f"{hiked_inst} / {total_inst} instances"
+        p1_sub = f"{zero_inst} at {zero_amt} hike" if zero_inst > 0 else "100% of fleet affected"
+        p1_tip = (
+            f"{hiked_inst} hiked ({format_money(total_hike, cur, signed=True)}/mo); "
+            f"{zero_active_inst} active in 0%-hike series/region, {zero_off_inst} deallocated"
+        )
+    else:
+        p1_cls = "ok"
+        p1_val = f"0 hiked ({zero_amt})"
+        p1_sub = f"All {plural(total_inst, 'instance')} at 0%"
+        p1_tip = "All legacy instances in scope are in 0%-hike regions/series or deallocated"
+
+    # Panel 2: Detected Discount (compact KPI + tooltip explanation, neutral peer styling)
+    obs_disc = report.observed_discount
+    if obs_disc is not None and report.cost_source != "retail":
+        d_pct, d_ratio = obs_disc
+        disc_val = f"-{d_pct:.1f}% off Retail"
+        disc_sub = "Kept on PAYG \u00b7 RIs un-stacked"
+        disc_tip = (
+            f"Cost Management actuals average {d_ratio:.3f}x public Retail PAYG; "
+            "preserved on PAYG targets, while 3-Year RIs use un-stacked public RI rates"
+        )
+        disc_cls = ""
+    elif report.has_cost_management_data and report.cost_source != "retail":
+        disc_val = "Retail PAYG"
+        disc_sub = "0% discount in actuals"
+        disc_tip = "Cost Management actuals match public Retail PAYG rates"
+        disc_cls = ""
+    else:
+        disc_val = "Retail PAYG"
+        disc_sub = "Public list rates"
+        disc_tip = "Costed from Azure Retail Prices API list rates"
+        disc_cls = "dim"
+
+    # Panel 3: Concentration (compact KPI; top names in tooltip + Subscription table directly below)
+    subs = report.all_subscription_rows()
+    hiked_subs = [s for s in subs if s.monthly_delta > 0.005]
+    if hiked_subs and total_hike > 0:
+        top_n = hiked_subs[:3]
+        top_delta = round(sum(s.monthly_delta for s in top_n), 2)
+        top_pct = round((top_delta / total_hike) * 100.0)
+        p2_kicker = "Hike Concentration"
+        if len(subs) == 1:
+            p2_val = "1 subscription"
+            p2_sub = f"{format_money(top_delta, cur, signed=True)}/mo hike"
+        else:
+            p2_val = f"{top_pct}% in top {len(top_n)} subs"
+            p2_sub = f"Out of {plural(len(subs), 'subscription')}"
+        p2_tip = "Top hiked: " + ", ".join(s.subscription_name for s in top_n)
+    elif subs and total_cur > 0:
+        active_subs = sorted(subs, key=lambda s: (-s.current_monthly, s.subscription_name.lower()))
+        top_n = [s for s in active_subs if s.current_monthly > 0][:3]
+        top_cur = round(sum(s.current_monthly for s in top_n), 2)
+        top_pct = round((top_cur / total_cur) * 100.0)
+        p2_kicker = "Spend Concentration"
+        p2_val = f"{top_pct}% in top {len(top_n)} subs"
+        p2_sub = f"Out of {plural(len(subs), 'subscription')}"
+        p2_tip = "Top spend: " + ", ".join(s.subscription_name for s in top_n)
+    else:
+        p2_kicker = "Concentration"
+        p2_val = plural(len(subs), "subscription")
+        p2_sub = f"No active spend ({zero_amt})"
+        p2_tip = "No active billed legacy spend"
+
+    # Panel 4: Azure Advisor
+    adv_idle = sum(1 for r in recs if "shut down idle vm" in r.advisor_recommendation.lower())
+    adv_right = sum(
+        1 for r in recs
+        if r.advisor_recommendation and "shut down idle vm" not in r.advisor_recommendation.lower()
+    )
+    adv_total = adv_idle + adv_right
+    adv_val = f"{plural(adv_total, 'VM')} flagged" if adv_total > 0 else "0 alerts"
+    adv_parts = []
+    if adv_idle:
+        adv_parts.append(f"{adv_idle} idle")
+    if adv_right:
+        adv_parts.append(f"{adv_right} right-size")
+    adv_sub = " \u00b7 ".join(adv_parts) if adv_parts else "No idle or oversized VMs"
+    adv_tip = (
+        "Tick 'Stop Advisor idle VMs' in the toolbar below to model shutting down idle VMs"
+        if adv_idle > 0
+        else "Azure Advisor Cost recommendations matched to legacy VMs"
+    )
+
+    # Panel 5: Quota & RI Check
+    any_quota_checked = any(bool(r.quota_status) for r in recs)
+    quota_groups = {}
+    for r in recs:
+        if "Increase Needed" in r.quota_status or "Quota 0/" in r.quota_status:
+            key = (r.subscription_name, r.region, r.quota_status)
+            quota_groups[key] = quota_groups.get(key, 0) + r.instance_count
+    ri_cov = sum(r.instance_count for r in recs if "RI Covered" in r.ri_status or "Partial RI" in r.ri_status)
+    ri_short = f"{plural(ri_cov, 'active RI')}" if ri_cov != 1 else "1 active RI"
+
+    if quota_groups:
+        first_q = next(iter(quota_groups))
+        q_val = f"{plural(len(quota_groups), 'quota uplift')} needed"
+        q_sub = ri_short
+        q_tip = f"{first_q[0]} ({first_q[1]}): {first_q[2]}"
+        q_cls = "bad"
+    elif any_quota_checked:
+        q_val = "Quotas ready"
+        q_sub = ri_short
+        q_tip = "Sufficient regional target vCPU family headroom across all scanned subscriptions"
+        q_cls = "ok"
+    else:
+        q_val = "Quotas unchecked"
+        q_sub = ri_short
+        q_tip = "Grant Microsoft.Compute/locations/usages/read to pre-check regional v5 vCPU limits"
+        q_cls = "dim"
+
+    return "\n".join([
+        '<section class="panel">',
+        '<div class="brief-grid">',
+        f'<div class="bcard" title="{_e(p1_tip)}">',
+        '<span class="bk">Hike Exposure</span>',
+        f'<span class="bv {p1_cls}">{_e(p1_val)}</span>',
+        f'<span class="bs">{_e(p1_sub)}</span>',
+        "</div>",
+        '<div class="bcard"' + f' title="{_e(disc_tip)}">',
+        '<span class="bk">Detected Discount</span>',
+        f'<span class="bv {disc_cls}" id="brief-disc-val" data-orig-val="{_e(disc_val)}" data-orig-cls="bv {disc_cls}">{_e(disc_val)}</span>',
+        f'<span class="bs" id="brief-disc-sub" data-orig-sub="{_e(disc_sub)}">{_e(disc_sub)}</span>',
+        "</div>",
+        f'<div class="bcard" title="{_e(p2_tip)}">',
+        f'<span class="bk">{_e(p2_kicker)}</span>',
+        f'<span class="bv">{_e(p2_val)}</span>',
+        f'<span class="bs">{_e(p2_sub)}</span>',
+        "</div>",
+        f'<div class="bcard" title="{_e(adv_tip)}">',
+        '<span class="bk">Azure Advisor</span>',
+        f'<span class="bv {"warn" if adv_total else "ok"}">{_e(adv_val)}</span>',
+        f'<span class="bs">{_e(adv_sub)}</span>',
+        "</div>",
+        f'<div class="bcard" title="{_e(q_tip)}">',
+        '<span class="bk">Quota &amp; RIs</span>',
+        f'<span class="bv {q_cls}">{_e(q_val)}</span>',
+        f'<span class="bs">{_e(q_sub)}</span>',
+        "</div>",
+        "</div>",
+        "</section>",
+    ])
 
 
 def render_html(report: Report) -> str:
@@ -861,36 +1220,44 @@ def render_html(report: Report) -> str:
         "</section>",
     ]
 
-    # Compact 2-row interactive toolbar
+    if any_ok and gt.resource_count > 0:
+        parts.append(_render_executive_brief(report, cur))
+
+    # Streamlined interactive toolbar with collapsible advanced assumptions
     init_mode = report.policy.name
     init_src = report.cost_source
     lm_label = report.last_month_label
     cm_label = report.current_month_label
     checked_dealloc = " checked" if report.include_deallocated_cost else ""
+    gen_chips_html = "".join(
+        f'<label class="chip"><input type="checkbox" class="gen-mig-check" '
+        f'data-gen="{_e(g)}" id="sim-mig-{_e(g)}" checked> {_e(g)} fleet</label>'
+        for g in report.generations
+    )
     parts += [
         f'<section class="panel" id="hike-simulator" data-symbol="{_e(sym)}" data-initial-mode="{_e(init_mode)}">',
         '<div class="toolbar">',
         '<div class="tgroup">',
-        '<label class="ctrl"><strong>Migrate to:</strong> '
+        '<label class="ctrl"><strong>Target:</strong> '
         '<select id="sim-target-tier">'
         '<option value="v5-payg" selected>v5 Bridge (PAYG)</option>'
         '<option value="v6-payg">v6 / v7 Strategic (PAYG)</option>'
         '<option value="v5-ri">v5 Bridge + 3-Year RI/SP</option>'
         '<option value="v6-ri">v6 / v7 + 3-Year RI/SP</option>'
         "</select></label>",
-        '<label class="chip"><input type="checkbox" id="sim-mig-v1" checked> v1 fleet</label>',
-        '<label class="chip"><input type="checkbox" id="sim-mig-v2" checked> v2 fleet</label>',
-        '<label class="chip"><input type="checkbox" id="sim-mig-v3" checked> v3 fleet</label>',
+        gen_chips_html,
         '<label class="chip"><input type="checkbox" id="sim-shut-idle"> Stop Advisor idle VMs</label>',
         "</div>",
         '<div class="tgroup">',
-        '<button type="button" class="btn" data-mig-preset="all">Migrate All</button>',
+        '<button type="button" class="btn" data-mig-preset="all">All Legacy</button>',
         '<button type="button" class="btn" data-mig-preset="v1v2">v1 &amp; v2 Only (+25%)</button>',
-        '<button type="button" class="btn" data-mig-preset="cheaper-feb">Cheaper than Feb Only</button>',
-        '<button type="button" class="btn" data-mig-preset="none">Do Nothing (None)</button>',
+        '<button type="button" class="btn" data-mig-preset="cheaper-feb">Savings Only</button>',
+        '<button type="button" class="btn" data-mig-preset="none">None</button>',
         "</div>",
         "</div>",
-        '<div class="toolbar" style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">',
+        '<details class="adv">',
+        "<summary>Assumptions, Cost Baseline &amp; Custom Hike Rules</summary>",
+        '<div class="toolbar adv-body">',
         '<div class="tgroup">',
         '<label class="ctrl"><strong>Cost Baseline:</strong> '
         '<select id="sim-cost-source">'
@@ -920,39 +1287,39 @@ def render_html(report: Report) -> str:
         f'<label class="ctrl">v3% <input type="number" id="sim-v3" step="0.5" value="{report.policy.v3_hike_pct:g}"></label>',
         "</div>",
         "</div>",
+        "</details>",
         "</section>",
     ]
 
-    # Generation summary table with 3 colour-coded column groups
+    # Generation summary table (self-explanatory plain-English column headers, compact zero-scroll widths)
     parts += [
         '<section class="panel">',
-        '<div class="bar"><h3>By VM Generation: Today vs Doing Nothing vs Migrating</h3></div>',
+        '<div class="bar"><h3>By VM Generation</h3></div>',
         '<div class="scroll">',
         "<table>",
         "<thead>",
         '<tr class="group-head">',
         '<th colspan="3">Fleet Footprint</th>',
         '<th class="num g-today">1. Today</th>',
-        '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing (Stay)</th>',
-        '<th colspan="4" class="num g-mig">3. Feb 2027: Migrate to Target SKU</th>',
+        '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
+        '<th colspan="3" class="num g-mig">3. Feb 2027: Migration Plan</th>',
         "</tr>",
         "<tr>",
         _th("Generation", sortable=False),
-        _th("Instances (Active / Off)", numeric=True, sortable=False),
+        _th("Instances (Run / Off)", numeric=True, sortable=False),
         _th("vCPUs", numeric=True, sortable=False),
-        _th("Current / mo", numeric=True, sortable=False),
-        _th("Do Nothing / mo", numeric=True, sortable=False),
-        _th("vs Today (Hike)", numeric=True, sortable=False),
-        _th("Migrated / mo", numeric=True, sortable=False),
-        _th("vs Today (New SKU)", numeric=True, sortable=False),
-        _th("vs Do Nothing (Saved)", numeric=True, sortable=False),
-        _th("With 3Y RI / mo", numeric=True, sortable=False),
+        _th("Spend Today", numeric=True, sortable=False, title="Current monthly spend before February 2027 price hikes"),
+        _th("Unmigrated Spend", numeric=True, sortable=False, title="Projected monthly spend in February 2027 if left on legacy SKUs"),
+        _th("Hike Penalty", numeric=True, sortable=False, title="Extra monthly cost added in February 2027 by legacy/regional price hikes"),
+        _th("Migrated Spend", numeric=True, sortable=False, title="Projected monthly spend under your selected migration plan above"),
+        _th("Saving vs Do Nothing", numeric=True, sortable=False, title="Monthly difference between your Migration Plan and Unmigrated Feb 2027 spend"),
+        _th("Migrated + 3Y RI", numeric=True, sortable=False, title="Monthly spend after migrating onto modern v5/v6 SKUs (which unlocks new 3-Year Reserved Instances)"),
         "</tr></thead><tbody>",
     ]
     retire_windows = {
-        "v1": "Retires May/Nov 2028",
-        "v2": "Retires May/Nov 2028",
-        "v3": "Retires Nov 2029 (RI blocked)",
+        "v1": "Retires May/Nov 2028 \u00b7 RI Unavailable",
+        "v2": "Retires May/Nov 2028 \u00b7 RI Unavailable",
+        "v3": "Retires Nov 2029 \u00b7 RI Unavailable",
         "v4": "Regional hike only",
         "v5": "Current generation",
         "v6": "Current generation",
@@ -996,30 +1363,24 @@ def _render_gen_tr(
 ) -> str:
     row_cls = "gen-summary-row total-row" if is_total else "gen-summary-row"
     gen_badge = _badge(gen_key, f"gen-{gen_key}" if not is_total else "accent")
-    gen_cell_html = f'{gen_badge} <span class="meta">{_e(retire_label)}</span>'
+    gen_cell_html = f'<span class="gen-inline">{gen_badge}<span class="meta">{_e(retire_label)}</span></span>'
     if not available:
-        cells = [_td("", html=gen_cell_html)] + [_td("n/a", cls="num dim")] * 9
+        cells = [_td("", cls="wrap", html=gen_cell_html)] + [_td("n/a", cls="num dim")] * 8
         return f'<tr class="{row_cls}" data-gen-summary="{_e(gen_key)}">' + "".join(cells) + "</tr>"
     inst_str = f"{s.instance_count} ({s.running_instances} / {s.deallocated_instances})"
-    stay_vs_cur = f"{format_money(s.monthly_delta, cur, signed=True)} ({format_pct(s.effective_hike_pct, signed=True)})"
-    mig_vs_cur = f"{format_money(s.target_v5_delta_vs_current, cur, signed=True)} ({format_pct(s.target_v5_pct_vs_current, signed=True)})"
-    mig_vs_feb = f"{format_money(s.target_v5_delta_vs_feb, cur, signed=True)} ({format_pct(s.target_v5_pct_vs_feb, signed=True)})"
+    stay_vs_cur = _fmt_hike_cell(s.monthly_delta, s.effective_hike_pct, cur)
+    mig_vs_feb = _fmt_net_vs_stay(s.target_v5_delta_vs_feb, s.target_v5_pct_vs_feb, cur)
     cells = [
-        _td("", html=gen_cell_html),
+        _td("", cls="wrap", html=gen_cell_html),
         _td(inst_str, cls="num"),
         _td(s.total_vcpus, cls="num"),
         _td(format_money(s.current_monthly, cur), cls="num c-today", col="cur"),
         _td(format_money(s.feb_monthly, cur), cls="num warn c-stay", col="feb"),
-        _td(stay_vs_cur, cls="num bad" if s.monthly_delta > 0 else "num dim", col="delta"),
+        _td(stay_vs_cur, cls="num bad" if s.monthly_delta > 0.005 else "num dim", col="delta"),
         _td(format_money(s.target_v5_monthly, cur), cls="num ok c-mig", col="v5"),
         _td(
-            mig_vs_cur,
-            cls="num ok" if s.target_v5_delta_vs_current < 0 else ("num warn" if s.target_v5_delta_vs_current > 0 else "num dim"),
-            col="migcur",
-        ),
-        _td(
             mig_vs_feb,
-            cls="num ok" if s.target_v5_delta_vs_feb < 0 else "num",
+            cls="num ok" if s.target_v5_delta_vs_feb < -0.005 else ("num bad" if s.target_v5_delta_vs_feb > 0.005 else "num dim"),
             col="v5save",
         ),
         _td(format_money(s.target_v5_3yr_ri_monthly, cur), cls="num ok", col="v5ri"),
@@ -1049,13 +1410,20 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
     lines += ["</div></div>"]
 
     if tenant.fetched and tenant.records:
+        mg_tab_btn = (
+            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="mgs" '
+            f'aria-selected="false">By Management Group ({len(tenant.management_group_rows)})</button>'
+            if tenant.management_group_rows
+            else ""
+        )
         lines += [
             '<div class="tabs">',
-            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="all" aria-selected="true">Show All</button>',
+            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="subs" aria-selected="true">By Subscription ({len(tenant.subscription_rows)})</button>',
             f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="skus" aria-selected="false">By SKU ({len(tenant.sku_rows)})</button>',
-            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="subs" aria-selected="false">By Subscription ({len(tenant.subscription_rows)})</button>',
-            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="waves" aria-selected="false">By Migration Wave ({len(tenant.wave_rows)})</button>',
-            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="vms" aria-selected="false">All VMs ({len(tenant.records)})</button>',
+            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="waves" aria-selected="false">By Wave ({len(tenant.wave_rows)})</button>',
+            mg_tab_btn,
+            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="vms" aria-selected="false">VM Inventory ({len(tenant.records)})</button>',
+            f'<button type="button" class="tab-btn" data-tab-group="{tgroup}" data-tab-target="all" aria-selected="false">Show All</button>',
             "</div>",
         ]
     lines.append("</div>")
@@ -1065,95 +1433,7 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
     elif not tenant.records:
         lines.append('<p class="empty ok">No legacy v1, v2 or v3 VM SKUs are deployed in this tenant.</p>')
     else:
-        # 1. SKU breakdown table (compact, grouped headers)
-        sku_table_id = f"skus-{index}"
-        lines += [
-            f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="skus">',
-            '<div class="bar">',
-            f"<h3>By Legacy SKU ({len(tenant.sku_rows)} SKUs \u2014 tick/untick to toggle migration)</h3>",
-            f'<input type="search" placeholder="Filter SKUs\u2026" data-filter="{sku_table_id}">',
-            "</div>",
-            '<div class="scroll">',
-            f'<table class="sortable" id="{sku_table_id}">',
-            "<thead>",
-            '<tr class="group-head">',
-            '<th colspan="4">Legacy SKU &amp; Footprint</th>',
-            '<th class="num g-today">1. Today</th>',
-            '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
-            '<th colspan="4" class="num g-mig">3. Feb 2027: Migrate</th>',
-            "</tr>",
-            "<tr>",
-            _th("Mig", sortable=False),
-            _th("Legacy SKU"),
-            _th("Inst (Act/Off)", numeric=True),
-            _th("vCPUs", numeric=True),
-            _th("Current / mo", numeric=True),
-            _th("Do Nothing / mo", numeric=True),
-            _th("vs Today (Hike)", numeric=True),
-            _th("Target SKU"),
-            _th("Migrated / mo", numeric=True),
-            _th("vs Today (New SKU)", numeric=True),
-            _th("vs Do Nothing (Saved)", numeric=True),
-            "</tr></thead><tbody>",
-        ]
-        for srow in tenant.sku_rows:
-            sku_key = f"{tid}|{srow.sku}"
-            gen_badge = _badge(srow.generation, f"gen-{srow.generation}")
-            stay_vs_cur_str = f"{format_money(srow.monthly_delta, cur, signed=True)} ({format_pct(srow.hike_pct, signed=True)})"
-            mig_vs_cur_str = f"{format_money(srow.target_v5_delta_vs_current, cur, signed=True)} ({format_pct(srow.target_v5_pct_vs_current, signed=True)})"
-            mig_vs_feb_str = f"{format_money(srow.target_v5_delta_vs_feb, cur, signed=True)} ({format_pct(srow.target_v5_pct_vs_feb, signed=True)})"
-            sku_cb_html = (
-                f'<input type="checkbox" class="sku-mig-check" data-tenant="{_e(tid)}" '
-                f'data-sku="{_e(srow.sku)}" checked title="Toggle migration for {_e(srow.sku)}">'
-            )
-            sku_cell_html = (
-                f'<span class="cell-main">{_e(srow.sku)} {gen_badge}</span>'
-                f'<span class="cell-sub">{_e(srow.series)} \u00b7 Retires {_e(srow.retirement_date)} \u00b7 {_e(", ".join(srow.regions))}</span>'
-            )
-            tgt_cell_html = (
-                f'<span class="cell-main">{_e(srow.target_v5_sku or srow.recommended_v5)}</span>'
-                f'<span class="cell-sub">v6: {_e(srow.target_current_sku or srow.recommended_current)}</span>'
-            )
-            lines.append(
-                f'<tr class="sku-summary-row" data-sku-key="{_e(sku_key)}" data-gen="{_e(srow.generation)}">'
-                + "".join([
-                    _td("", html=sku_cb_html),
-                    _td("", sort=srow.sku, html=sku_cell_html),
-                    _td(f"{srow.instance_count} ({srow.running_instances}/{srow.deallocated_instances})", cls="num", sort=srow.instance_count),
-                    _td(srow.vcpus_per_instance * srow.instance_count, cls="num", sort=srow.vcpus_per_instance * srow.instance_count),
-                    _td(format_money(srow.current_monthly, cur), cls="num c-today", sort=f"{srow.current_monthly:.2f}", col="cur"),
-                    _td(format_money(srow.feb_monthly, cur), cls="num warn c-stay", sort=f"{srow.feb_monthly:.2f}", col="feb"),
-                    _td(
-                        stay_vs_cur_str,
-                        cls="num bad" if srow.monthly_delta > 0 else "num dim",
-                        sort=f"{srow.monthly_delta:.2f}",
-                        col="delta",
-                    ),
-                    _td("", sort=srow.target_v5_sku, html=tgt_cell_html),
-                    _td(
-                        format_money(srow.target_v5_monthly, cur),
-                        cls="num ok c-mig",
-                        sort=f"{srow.target_v5_monthly:.2f}",
-                        col="v5",
-                    ),
-                    _td(
-                        mig_vs_cur_str,
-                        cls="num ok" if srow.target_v5_delta_vs_current < 0 else ("num warn" if srow.target_v5_delta_vs_current > 0 else "num dim"),
-                        sort=f"{srow.target_v5_delta_vs_current:.2f}",
-                        col="migcur",
-                    ),
-                    _td(
-                        mig_vs_feb_str,
-                        cls="num ok" if srow.target_v5_delta_vs_feb < 0 else ("num bad" if srow.target_v5_delta_vs_feb > 0 else "num dim"),
-                        sort=f"{srow.target_v5_savings_vs_feb:.2f}",
-                        col="v5save",
-                    ),
-                ])
-                + "</tr>"
-            )
-        lines += ["</tbody></table></div></div>"]
-
-        # 2. Subscription breakdown table
+        # 1. Subscription breakdown table (default open tab — highest signal for owners)
         sub_table_id = f"subs-{index}"
         lines += [
             f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="subs">',
@@ -1168,17 +1448,17 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
             '<th colspan="3">Subscription &amp; Instances</th>',
             '<th class="num g-today">1. Today</th>',
             '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
-            '<th colspan="2" class="num g-mig">3. Feb 2027: Migrate</th>',
+            '<th colspan="2" class="num g-mig">3. Feb 2027: Migration Plan</th>',
             "</tr>",
             "<tr>",
             _th("Subscription"),
             _th("Instances (v1 / v2 / v3)", numeric=True),
             _th("vCPUs", numeric=True),
-            _th("Current / mo", numeric=True),
-            _th("Do Nothing / mo", numeric=True),
-            _th("vs Today (Hike)", numeric=True),
+            _th("Spend Today / mo", numeric=True),
+            _th("Unmigrated / mo", numeric=True),
+            _th("Price Hike / mo", numeric=True),
             _th("Migrated / mo", numeric=True),
-            _th("vs Do Nothing (Saved)", numeric=True),
+            _th("Saving vs Doing Nothing", numeric=True),
             "</tr></thead><tbody>",
         ]
         for sub_row in tenant.subscription_rows:
@@ -1194,14 +1474,14 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
             lines.append(
                 f'<tr class="sub-summary-row" data-sub-key="{_e(sub_key)}">'
                 + "".join([
-                    _td("", sort=sub_row.subscription_name, title=sub_row.subscription_id, html=sub_cell_html),
+                    _td("", cls="wrap", sort=sub_row.subscription_name, title=sub_row.subscription_id, html=sub_cell_html),
                     _td(inst_breakdown, cls="num", sort=sub_row.total_instances),
                     _td(sub_row.total_vcpus, cls="num", sort=sub_row.total_vcpus),
                     _td(format_money(sub_row.current_monthly, cur), cls="num c-today", sort=f"{sub_row.current_monthly:.2f}", col="cur"),
                     _td(format_money(sub_row.feb_monthly, cur), cls="num warn c-stay", sort=f"{sub_row.feb_monthly:.2f}", col="feb"),
                     _td(
-                        f"{format_money(sub_row.monthly_delta, cur, signed=True)} ({format_pct(sub_hike_pct, signed=True)})",
-                        cls="num bad" if sub_row.monthly_delta > 0 else "num dim",
+                        _fmt_hike_cell(sub_row.monthly_delta, sub_hike_pct, cur),
+                        cls="num bad" if sub_row.monthly_delta > 0.005 else "num dim",
                         sort=f"{sub_row.monthly_delta:.2f}",
                         col="delta",
                     ),
@@ -1212,9 +1492,99 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                         col="v5",
                     ),
                     _td(
-                        f"{format_money(sub_mig_feb, cur, signed=True)} ({format_pct(sub_mig_feb_pct, signed=True)})",
-                        cls="num ok" if sub_mig_feb < 0 else "num dim",
+                        _fmt_net_vs_stay(sub_mig_feb, sub_mig_feb_pct, cur),
+                        cls="num ok" if sub_mig_feb < -0.005 else ("num bad" if sub_mig_feb > 0.005 else "num dim"),
                         sort=f"{sub_row.target_v5_savings_vs_feb:.2f}",
+                        col="v5save",
+                    ),
+                ])
+                + "</tr>"
+            )
+        lines += ["</tbody></table></div></div>"]
+
+        # 2. SKU breakdown table (hidden until clicked, compact 10 columns)
+        sku_table_id = f"skus-{index}"
+        lines += [
+            f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="skus" hidden>',
+            '<div class="bar">',
+            f"<h3>By Legacy SKU ({len(tenant.sku_rows)} SKUs \u2014 tick/untick to toggle migration)</h3>",
+            f'<input type="search" placeholder="Filter SKUs\u2026" data-filter="{sku_table_id}">',
+            "</div>",
+            '<div class="scroll">',
+            f'<table class="sortable" id="{sku_table_id}">',
+            "<thead>",
+            '<tr class="group-head">',
+            '<th colspan="4">Legacy SKU &amp; Footprint</th>',
+            '<th class="num g-today">1. Today</th>',
+            '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
+            '<th colspan="3" class="num g-mig">3. Feb 2027: Migration Plan</th>',
+            "</tr>",
+            "<tr>",
+            _th("Mig", sortable=False),
+            _th("Legacy SKU"),
+            _th("Inst (Act/Off)", numeric=True),
+            _th("vCPUs", numeric=True),
+            _th("Spend Today / mo", numeric=True),
+            _th("Unmigrated / mo", numeric=True),
+            _th("Price Hike / mo", numeric=True),
+            _th("Target Modern SKU"),
+            _th("Migrated / mo", numeric=True),
+            _th("Saving vs Doing Nothing", numeric=True),
+            "</tr></thead><tbody>",
+        ]
+        for srow in tenant.sku_rows:
+            sku_key = f"{tid}|{srow.sku}"
+            gen_badge = _badge(srow.generation, f"gen-{srow.generation}")
+            stay_vs_cur_str = _fmt_hike_cell(srow.monthly_delta, srow.hike_pct, cur)
+            mig_vs_feb_str = _fmt_net_vs_stay(srow.target_v5_delta_vs_feb, srow.target_v5_pct_vs_feb, cur)
+            sku_cb_html = (
+                f'<input type="checkbox" class="sku-mig-check" data-tenant="{_e(tid)}" '
+                f'data-sku="{_e(srow.sku)}" checked title="Toggle migration for {_e(srow.sku)}">'
+            )
+            sku_cell_html = (
+                f'<span class="cell-main">{_e(srow.sku)} {gen_badge}</span>'
+                f'<span class="cell-sub">{_e(srow.series)} \u00b7 Retires {_e(srow.retirement_date)} \u00b7 {_e(", ".join(srow.regions))}</span>'
+            )
+            tgt_cell_html = (
+                f'<span class="cell-main">{_e(srow.target_v5_sku or srow.recommended_v5)}</span>'
+                f'<span class="cell-sub">v6: {_e(srow.target_current_sku or srow.recommended_current)}</span>'
+            )
+            vs_cur_sub = (
+                f"vs Today: {format_money(srow.target_v5_delta_vs_current, cur, signed=True)}"
+                if abs(srow.target_v5_delta_vs_current) > 0.005
+                else ""
+            )
+            plan_cell_html = (
+                f'<span class="cell-main">{_e(format_money(srow.target_v5_monthly, cur))}</span>'
+                f'<span class="cell-sub" data-col="migsub">{_e(vs_cur_sub)}</span>'
+            )
+            lines.append(
+                f'<tr class="sku-summary-row" data-sku-key="{_e(sku_key)}" data-gen="{_e(srow.generation)}">'
+                + "".join([
+                    _td("", html=sku_cb_html),
+                    _td("", cls="wrap", sort=srow.sku, html=sku_cell_html),
+                    _td(f"{srow.instance_count} ({srow.running_instances}/{srow.deallocated_instances})", cls="num", sort=srow.instance_count),
+                    _td(srow.vcpus_per_instance * srow.instance_count, cls="num", sort=srow.vcpus_per_instance * srow.instance_count),
+                    _td(format_money(srow.current_monthly, cur), cls="num c-today", sort=f"{srow.current_monthly:.2f}", col="cur"),
+                    _td(format_money(srow.feb_monthly, cur), cls="num warn c-stay", sort=f"{srow.feb_monthly:.2f}", col="feb"),
+                    _td(
+                        stay_vs_cur_str,
+                        cls="num bad" if srow.monthly_delta > 0.005 else "num dim",
+                        sort=f"{srow.monthly_delta:.2f}",
+                        col="delta",
+                    ),
+                    _td("", sort=srow.target_v5_sku, html=tgt_cell_html),
+                    _td(
+                        "",
+                        cls="num ok c-mig",
+                        sort=f"{srow.target_v5_monthly:.2f}",
+                        col="v5",
+                        html=plan_cell_html,
+                    ),
+                    _td(
+                        mig_vs_feb_str,
+                        cls="num ok" if srow.target_v5_delta_vs_feb < -0.005 else ("num bad" if srow.target_v5_delta_vs_feb > 0.005 else "num dim"),
+                        sort=f"{srow.target_v5_savings_vs_feb:.2f}",
                         col="v5save",
                     ),
                 ])
@@ -1225,7 +1595,7 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
         # 3. Migration Wave breakdown table
         if tenant.wave_rows:
             lines += [
-                f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="waves">',
+                f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="waves" hidden>',
                 '<div class="bar"><h3>By Migration Wave</h3></div>',
                 '<div class="scroll">',
                 "<table>",
@@ -1234,43 +1604,35 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                 '<th colspan="3">Migration Wave</th>',
                 '<th class="num g-today">1. Today</th>',
                 '<th class="num g-stay">2. Do Nothing</th>',
-                '<th colspan="4" class="num g-mig">3. Migrate</th>',
+                '<th colspan="3" class="num g-mig">3. Feb 2027: Migration Plan</th>',
                 "</tr>",
                 "<tr>",
                 _th("Wave", sortable=False),
                 _th("Instances", numeric=True, sortable=False),
                 _th("vCPUs", numeric=True, sortable=False),
-                _th("Current / mo", numeric=True, sortable=False),
-                _th("Do Nothing / mo", numeric=True, sortable=False),
+                _th("Spend Today / mo", numeric=True, sortable=False),
+                _th("Unmigrated / mo", numeric=True, sortable=False),
                 _th("Migrated / mo", numeric=True, sortable=False),
-                _th("vs Today (New SKU)", numeric=True, sortable=False),
-                _th("vs Do Nothing (Saved)", numeric=True, sortable=False),
-                _th("With 3Y RI / mo", numeric=True, sortable=False),
+                _th("Saving vs Doing Nothing", numeric=True, sortable=False),
+                _th("Migrated + 3Y RI / mo", numeric=True, sortable=False),
                 "</tr></thead><tbody>",
             ]
             for wrow in tenant.wave_rows:
                 wkey = f"{tid}|{wrow.wave}"
-                w_m_cur = round(wrow.target_v5_monthly - wrow.current_monthly, 2)
-                w_p_cur = round((w_m_cur / wrow.current_monthly) * 100.0, 2) if wrow.current_monthly > 0 else 0.0
                 w_m_feb = round(wrow.target_v5_monthly - wrow.feb_monthly, 2)
                 w_p_feb = round((w_m_feb / wrow.feb_monthly) * 100.0, 2) if wrow.feb_monthly > 0 else 0.0
                 lines.append(
                     f'<tr class="wave-summary-row" data-wave-key="{_e(wkey)}">'
                     + "".join([
-                        _td(wrow.wave),
+                        _td(wrow.wave, cls="wrap"),
                         _td(wrow.instance_count, cls="num"),
                         _td(wrow.total_vcpus, cls="num"),
                         _td(format_money(wrow.current_monthly, cur), cls="num c-today", col="cur"),
                         _td(format_money(wrow.feb_monthly, cur), cls="num warn c-stay", col="feb"),
                         _td(format_money(wrow.target_v5_monthly, cur), cls="num ok c-mig", col="v5"),
                         _td(
-                            f"{format_money(w_m_cur, cur, signed=True)} ({format_pct(w_p_cur, signed=True)})",
-                            cls="num ok" if w_m_cur < 0 else "num",
-                            col="migcur",
-                        ),
-                        _td(
-                            f"{format_money(w_m_feb, cur, signed=True)} ({format_pct(w_p_feb, signed=True)})",
-                            cls="num ok" if w_m_feb < 0 else "num",
+                            _fmt_net_vs_stay(w_m_feb, w_p_feb, cur),
+                            cls="num ok" if w_m_feb < -0.005 else ("num bad" if w_m_feb > 0.005 else "num dim"),
                             col="v5save",
                         ),
                         _td(format_money(wrow.target_v5_3yr_ri_monthly, cur), cls="num ok", col="v5ri"),
@@ -1279,43 +1641,126 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                 )
             lines += ["</tbody></table></div></div>"]
 
-        # 4. VM inventory table (compact, scannable)
+        # 4. Management Group breakdown table
+        if tenant.management_group_rows:
+            mg_table_id = f"mgs-{index}"
+            lines += [
+                f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="mgs" hidden>',
+                '<div class="bar">',
+                f"<h3>By Management Group ({len(tenant.management_group_rows)} groups)</h3>",
+                f'<input type="search" placeholder="Filter management groups\u2026" data-filter="{mg_table_id}">',
+                "</div>",
+                '<div class="scroll">',
+                f'<table class="sortable" id="{mg_table_id}">',
+                "<thead>",
+                '<tr class="group-head">',
+                '<th colspan="4">Management Group &amp; Footprint</th>',
+                '<th class="num g-today">1. Today</th>',
+                '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
+                '<th colspan="2" class="num g-mig">3. Feb 2027: Migration Plan</th>',
+                "</tr>",
+                "<tr>",
+                _th("Management Group"),
+                _th("Subscriptions", numeric=True),
+                _th("Instances", numeric=True),
+                _th("vCPUs", numeric=True),
+                _th("Spend Today / mo", numeric=True),
+                _th("Unmigrated / mo", numeric=True),
+                _th("Price Hike / mo", numeric=True),
+                _th("Migrated / mo", numeric=True),
+                _th("Saving vs Doing Nothing", numeric=True),
+                "</tr></thead><tbody>",
+            ]
+            for mg_row in tenant.management_group_rows:
+                mg_key = f"{tid}|{mg_row.management_group}"
+                mg_hike_pct = (
+                    round((mg_row.monthly_delta / mg_row.current_monthly) * 100.0, 2)
+                    if mg_row.current_monthly > 0
+                    else 0.0
+                )
+                mg_mig_feb = round(mg_row.target_v5_monthly - mg_row.feb_monthly, 2)
+                mg_mig_feb_pct = (
+                    round((mg_mig_feb / mg_row.feb_monthly) * 100.0, 2)
+                    if mg_row.feb_monthly > 0
+                    else 0.0
+                )
+                lines.append(
+                    f'<tr class="mg-summary-row" data-mg-key="{_e(mg_key)}">'
+                    + "".join([
+                        _td(mg_row.management_group, cls="wrap", sort=mg_row.management_group),
+                        _td(mg_row.subscription_count, cls="num", sort=mg_row.subscription_count),
+                        _td(mg_row.total_instances, cls="num", sort=mg_row.total_instances),
+                        _td(mg_row.total_vcpus, cls="num", sort=mg_row.total_vcpus),
+                        _td(
+                            format_money(mg_row.current_monthly, cur),
+                            cls="num c-today",
+                            sort=f"{mg_row.current_monthly:.2f}",
+                            col="cur",
+                        ),
+                        _td(
+                            format_money(mg_row.feb_monthly, cur),
+                            cls="num warn c-stay",
+                            sort=f"{mg_row.feb_monthly:.2f}",
+                            col="feb",
+                        ),
+                        _td(
+                            _fmt_hike_cell(mg_row.monthly_delta, mg_hike_pct, cur),
+                            cls="num bad" if mg_row.monthly_delta > 0.005 else "num dim",
+                            sort=f"{mg_row.monthly_delta:.2f}",
+                            col="delta",
+                        ),
+                        _td(
+                            format_money(mg_row.target_v5_monthly, cur),
+                            cls="num ok c-mig",
+                            sort=f"{mg_row.target_v5_monthly:.2f}",
+                            col="v5",
+                        ),
+                        _td(
+                            _fmt_net_vs_stay(mg_mig_feb, mg_mig_feb_pct, cur),
+                            cls="num ok" if mg_mig_feb < -0.005 else ("num bad" if mg_mig_feb > 0.005 else "num dim"),
+                            sort=f"{mg_row.target_v5_savings_vs_feb:.2f}",
+                            col="v5save",
+                        ),
+                    ])
+                    + "</tr>"
+                )
+            lines += ["</tbody></table></div></div>"]
+
+        # 5. VM inventory table (hidden until clicked, with 1-click Hiked & Active noise filters)
         vm_table_id = f"vms-{index}"
+        gen_options_html = '<option value="">All generations</option>' + "".join(
+            f'<option value="{_e(g)}">{_e(g)} only</option>' for g in report.generations
+        )
         lines += [
-            f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="vms">',
+            f'<div class="block tab-pane" data-tab-group="{tgroup}" data-pane="vms" hidden>',
             '<div class="bar">',
-            f"<h3>Deployed Legacy VMs &amp; Scale Sets ({len(tenant.records)})</h3>",
+            f'<h3>VM &amp; Scale Set Inventory (<span data-count-for="{vm_table_id}">{len(tenant.records)} items</span>)</h3>',
             '<div class="controls">',
-            f'<select data-gen-filter="{vm_table_id}">'
-            '<option value="">All generations</option>'
-            '<option value="v1">v1 only</option>'
-            '<option value="v2">v2 only</option>'
-            '<option value="v3">v3 only</option>'
-            "</select>",
+            f'<label class="chip"><input type="checkbox" data-hiked-filter="{vm_table_id}"> Hiked (&gt;{_e(currency_symbol(cur))}0) only</label>',
+            f'<label class="chip"><input type="checkbox" data-active-filter="{vm_table_id}"> Active only</label>',
+            f'<select data-gen-filter="{vm_table_id}">{gen_options_html}</select>',
             f'<input type="search" placeholder="Search VM, SKU, subscription, RG\u2026" data-filter="{vm_table_id}">',
             "</div></div>",
             '<div class="scroll">',
-            f'<table class="sortable" id="{vm_table_id}">',
+            f'<table class="sortable vm-tbl" id="{vm_table_id}">',
             "<thead>",
             '<tr class="group-head">',
-            '<th colspan="4">Resource &amp; Legacy Config</th>',
+            '<th colspan="3">Resource &amp; Legacy Config</th>',
             '<th class="num g-today">1. Today</th>',
             '<th colspan="2" class="num g-stay">2. Feb 2027: Do Nothing</th>',
-            '<th colspan="4" class="num g-mig">3. Feb 2027: Migrate</th>',
-            '<th>Readiness</th>',
+            '<th colspan="3" class="num g-mig">3. Feb 2027: Migration Plan</th>',
+            '<th>Alerts</th>',
             "</tr>",
             "<tr>",
             _th("Mig", sortable=False),
             _th("Resource"),
-            _th("Legacy SKU"),
-            _th("State &amp; Hours"),
-            _th("Current / mo", numeric=True),
-            _th("Do Nothing / mo", numeric=True),
-            _th("vs Today (Hike)", numeric=True),
-            _th("Target SKU"),
-            _th("Migrated / mo", numeric=True),
-            _th("vs Today (New SKU)", numeric=True),
-            _th("vs Do Nothing (Saved)", numeric=True),
+            _th("Legacy SKU &amp; State"),
+            _th("Spend Today", numeric=True),
+            _th("Unmigrated", numeric=True),
+            _th("Hike Penalty", numeric=True),
+            _th("Target Modern SKU"),
+            _th("Migrated", numeric=True),
+            _th("Saving vs Do Nothing", numeric=True),
             _th("Signals"),
             "</tr></thead><tbody>",
         ]
@@ -1346,29 +1791,22 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
             mtd_ext_val = rec.actual_mtd_extrapolated_cost if rec.actual_mtd_extrapolated_cost is not None else 0.0
             v5_ratio = (rec.target_v5_hourly_rate / rec.hourly_rate) if rec.hourly_rate > 0 else 1.0
             v6_ratio = (rec.target_current_hourly_rate / rec.hourly_rate) if rec.hourly_rate > 0 else (v5_ratio * 1.04)
-            v5_ri_ratio = (
-                (rec.target_v5_3yr_ri_monthly / rec.current_monthly)
-                if rec.current_monthly > 0
-                else (v5_ratio * 0.55)
-            )
-            v6_ri_ratio = (
-                (rec.target_current_3yr_ri_monthly / rec.current_monthly)
-                if rec.current_monthly > 0
-                else (v6_ratio * 0.55)
-            )
+            reg_pct = REGIONAL_FEB_2027_HIKES.get(rec.region, 0.0)
             idle_flag = "1" if "shut down idle vm" in rec.advisor_recommendation.lower() else "0"
 
             res_cell_html = (
                 f'<span class="cell-main">{_e(name_label)}</span>'
                 f'<span class="cell-sub">{_e(rec.subscription_name)} \u00b7 {_e(rec.resource_group)} \u00b7 {_e(rec.region)}</span>'
             )
+            sku_sub_parts = [f"{rec.total_vcpus} vCPU", _e(os_short), f"{_e(format_hourly(rec.hourly_rate, cur))}/hr"]
+            if hrs_str:
+                sku_sub_parts.append(_e(hrs_str))
+            if rec.auto_shutdown_schedule:
+                sku_sub_parts.append(_e(rec.auto_shutdown_schedule))
+            sku_sub_joined = " \u00b7 ".join(sku_sub_parts)
             sku_cell_html = (
-                f'<span class="cell-main">{_e(rec.sku)} {gen_badge}</span>'
-                f'<span class="cell-sub">{rec.total_vcpus} vCPU \u00b7 {_e(os_short)} \u00b7 {_e(format_hourly(rec.hourly_rate, cur))}/hr</span>'
-            )
-            state_cell_html = (
-                f'{state_badge} <span class="meta">{_e(hrs_str)}</span>'
-                + (f'<span class="cell-sub">{_e(rec.auto_shutdown_schedule)}</span>' if rec.auto_shutdown_schedule else "")
+                f'<span class="cell-main">{_e(rec.sku)} {gen_badge} {state_badge}</span>'
+                f'<span class="cell-sub">{sku_sub_joined}</span>'
             )
             wave_short = rec.migration_wave.split(":", 1)[0] if ":" in rec.migration_wave else rec.migration_wave
             tgt_cell_html = (
@@ -1376,78 +1814,84 @@ def _render_tenant_section(report: Report, tenant: TenantReport, index: int) -> 
                 f'<span class="cell-sub">{_e(wave_short)} \u00b7 {_e(rec.deployment_kind)}</span>'
             )
 
+            # Only show actionable exceptions — never clutter healthy rows with 'Quota OK' pills
             sig_badges = []
             if idle_flag == "1":
                 sig_badges.append(_badge("Advisor: Idle", "warn"))
             elif rec.advisor_recommendation:
                 sig_badges.append(_badge("Advisor: Right-size", "warn"))
-            if "RI Covered" in rec.ri_status:
+            if "RI Covered" in rec.ri_status or "Partial RI" in rec.ri_status:
                 sig_badges.append(_badge("RI Covered", "ok"))
-            if "Increase Needed" in rec.quota_status:
-                sig_badges.append(_badge("Quota Needed", "bad"))
-            elif "Quota OK" in rec.quota_status:
-                sig_badges.append(_badge("Quota OK", "dim"))
+            if "Increase Needed" in rec.quota_status or "Quota 0/" in rec.quota_status:
+                sig_badges.append(_badge("Quota Uplift", "bad"))
             sig_html = " ".join(sig_badges) if sig_badges else '<span class="dim">\u2014</span>'
 
-            stay_vs_cur_str = f"{format_money(rec.monthly_delta, cur, signed=True)} ({format_pct(rec.hike_pct, signed=True)})"
-            rec_mig_vs_cur = f"{format_money(rec.target_v5_delta_vs_current, cur, signed=True)} ({format_pct(rec.target_v5_pct_vs_current, signed=True)})"
-            rec_mig_vs_feb = f"{format_money(rec.target_v5_delta_vs_feb, cur, signed=True)} ({format_pct(rec.target_v5_pct_vs_feb, signed=True)})"
+            stay_vs_cur_str = _fmt_hike_cell(rec.monthly_delta, rec.hike_pct, cur)
+            rec_mig_vs_feb = _fmt_net_vs_stay(rec.target_v5_delta_vs_feb, rec.target_v5_pct_vs_feb, cur)
+            vs_cur_sub = (
+                f"vs Today: {format_money(rec.target_v5_delta_vs_current, cur, signed=True)}"
+                if abs(rec.target_v5_delta_vs_current) > 0.005
+                else ""
+            )
+            plan_cell_html = (
+                f'<span class="cell-main">{_e(format_money(rec.target_v5_monthly, cur))}</span>'
+                f'<span class="cell-sub" data-col="migsub">{_e(vs_cur_sub)}</span>'
+            )
             vm_cb_html = '<input type="checkbox" class="vm-mig-check" checked title="Include this VM in migration">'
+            sig_title_parts = [p for p in (rec.advisor_recommendation, rec.quota_status, rec.cost_breakdown_note) if p]
 
             lines.append(
                 f'<tr class="vm-row" data-tenant="{_e(tid)}" data-sub="{_e(rec.subscription_id)}" '
+                f'data-mg="{_e(rec.management_group)}" '
                 f'data-sku="{_e(rec.sku)}" data-gen="{_e(rec.generation)}" '
                 f'data-wave="{_e(rec.migration_wave)}" data-inst="{rec.instance_count}" '
-                f'data-idle="{idle_flag}" '
+                f'data-idle="{idle_flag}" data-live-delta="{rec.monthly_delta:.2f}" '
                 f'data-v5-sku="{_e(rec.target_v5_sku or rec.recommended_v5)}" '
                 f'data-v6-sku="{_e(rec.target_current_sku or rec.recommended_current)}" '
                 f'data-prov-cur="{rec.provisioned_current_monthly:.2f}" '
                 f'data-sched-cur="{rec.schedule_adjusted_monthly:.2f}" '
                 f'data-has-cm="{has_cm_flag}" data-lm-cost="{lm_val:.2f}" data-mtd-ext="{mtd_ext_val:.2f}" '
                 f'data-billed="{billed_flag}" data-sh-pct="{rec.service_health_hike_pct:.2f}" '
+                f'data-reg-pct="{reg_pct:.2f}" '
                 f'data-v5-ratio="{v5_ratio:.4f}" data-v6-ratio="{v6_ratio:.4f}" '
-                f'data-v5-ri-ratio="{v5_ri_ratio:.4f}" data-v6-ri-ratio="{v6_ri_ratio:.4f}">'
+                f'data-v5-ri-24x7="{rec.target_v5_3yr_ri_24x7_monthly:.2f}" '
+                f'data-v6-ri-24x7="{rec.target_current_3yr_ri_24x7_monthly:.2f}">'
                 + "".join([
                     _td("", html=vm_cb_html),
-                    _td("", sort=rec.name, title=rec.resource_id, html=res_cell_html),
-                    _td("", sort=rec.sku, html=sku_cell_html),
-                    _td("", sort=f"{sched_sort:.1f}", html=state_cell_html),
+                    _td("", cls="wrap", sort=rec.name, title=rec.resource_id, html=res_cell_html),
+                    _td("", cls="wrap", sort=rec.sku, html=sku_cell_html),
                     _td(format_money(rec.current_monthly, cur), cls="num c-today", sort=f"{rec.current_monthly:.2f}", col="cur"),
                     _td(format_money(rec.feb_monthly, cur), cls="num warn c-stay", sort=f"{rec.feb_monthly:.2f}", col="feb"),
                     _td(
                         stay_vs_cur_str,
-                        cls="num bad" if rec.monthly_delta > 0 else "num dim",
+                        cls="num bad" if rec.monthly_delta > 0.005 else "num dim",
                         sort=f"{rec.monthly_delta:.2f}",
                         col="delta",
                     ),
-                    _td("", sort=rec.target_v5_sku, title=f"{rec.migration_cli_hint} ({rec.disk_controller_note})", html=tgt_cell_html),
+                    _td("", cls="wrap", sort=rec.target_v5_sku, title=f"{rec.migration_cli_hint} ({rec.disk_controller_note})", html=tgt_cell_html),
                     _td(
-                        format_money(rec.target_v5_monthly, cur),
+                        "",
                         cls="num ok c-mig",
                         sort=f"{rec.target_v5_monthly:.2f}",
                         col="v5",
-                    ),
-                    _td(
-                        rec_mig_vs_cur,
-                        cls="num ok" if rec.target_v5_delta_vs_current < 0 else ("num warn" if rec.target_v5_delta_vs_current > 0 else "num dim"),
-                        sort=f"{rec.target_v5_delta_vs_current:.2f}",
-                        col="migcur",
+                        html=plan_cell_html,
                     ),
                     _td(
                         rec_mig_vs_feb,
-                        cls="num ok" if rec.target_v5_delta_vs_feb < 0 else ("num bad" if rec.target_v5_delta_vs_feb > 0 else "num dim"),
+                        cls="num ok" if rec.target_v5_delta_vs_feb < -0.005 else ("num bad" if rec.target_v5_delta_vs_feb > 0.005 else "num dim"),
                         sort=f"{rec.target_v5_savings_vs_feb:.2f}",
                         col="v5save",
                     ),
-                    _td("", title=rec.cost_breakdown_note, html=sig_html),
+                    _td("", cls="wrap", title=" | ".join(sig_title_parts), html=sig_html),
                 ])
                 + "</tr>"
             )
         lines += ["</tbody></table></div></div>"]
 
-    if tenant.issues:
+    visible_issues = [iss for iss in tenant.issues if iss.feature != "negotiated-discount"]
+    if visible_issues:
         lines.append('<div class="block"><h3>Notes</h3>')
-        for issue in tenant.issues:
+        for issue in visible_issues:
             label, style = _LEVEL_LABELS.get(issue.level, ("Note", "dim"))
             lines.append(
                 f'<div class="note">{_badge(label, style)} '

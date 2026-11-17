@@ -136,3 +136,79 @@ class PricingTests(unittest.TestCase):
         self.assertAlmostEqual(t_neu.feb_payg_hourly_rate, round(t_neu.payg_hourly_rate * 1.17, 4), places=4)
         t_v7_neu = client.quote_target_sku("Standard_D4s_v7", 4, "northeurope", os_type="Linux")
         self.assertAlmostEqual(t_v7_neu.feb_payg_hourly_rate, t_v7_neu.payg_hourly_rate, places=4)
+
+    def test_same_year_meter_date_sorting_primary_region_and_live_3yr_ri(self) -> None:
+        items = [
+            {
+                "armSkuName": "Standard_E16ds_v5",
+                "productName": "Virtual Machines Edsv5 Series",
+                "skuName": "E16ds v5",
+                "meterName": "E16ds v5",
+                "type": "Consumption",
+                "unitOfMeasure": "1 Hour",
+                "retailPrice": 0.9500,
+                "currencyCode": "GBP",
+                "isPrimaryMeterRegion": True,
+                "effectiveStartDate": "2026-02-01T00:00:00Z",
+            },
+            {
+                "armSkuName": "Standard_E16ds_v5",
+                "productName": "Virtual Machines Edsv5 Series",
+                "skuName": "E16ds v5",
+                "meterName": "E16ds v5",
+                "type": "Consumption",
+                "unitOfMeasure": "1 Hour",
+                "retailPrice": 1.0166,
+                "currencyCode": "GBP",
+                "isPrimaryMeterRegion": True,
+                "effectiveStartDate": "2026-10-15T00:00:00Z",
+            },
+            {
+                "armSkuName": "Standard_E16ds_v5",
+                "productName": "Virtual Machines Edsv5 Series",
+                "skuName": "E16ds v5",
+                "meterName": "E16ds v5",
+                "type": "Consumption",
+                "unitOfMeasure": "1 Hour",
+                "retailPrice": 0.8888,
+                "currencyCode": "GBP",
+                "isPrimaryMeterRegion": False,
+                "effectiveStartDate": "2026-11-01T00:00:00Z",
+            },
+            {
+                "armSkuName": "Standard_E16ds_v5",
+                "productName": "Virtual Machines Edsv5 Series Windows",
+                "skuName": "E16ds v5",
+                "meterName": "E16ds v5",
+                "type": "Consumption",
+                "unitOfMeasure": "1 Hour",
+                "retailPrice": 1.5698,
+                "currencyCode": "GBP",
+                "isPrimaryMeterRegion": True,
+                "effectiveStartDate": "2026-10-15T00:00:00Z",
+            },
+            {
+                "armSkuName": "Standard_E16ds_v5",
+                "productName": "Virtual Machines Edsv5 Series",
+                "skuName": "E16ds v5",
+                "meterName": "E16ds v5",
+                "type": "Reservation",
+                "reservationTerm": "3 Years",
+                "unitOfMeasure": "1 Hour",
+                "retailPrice": 10151.498,  # £0.3863/hr over 26,280h
+                "currencyCode": "GBP",
+                "isPrimaryMeterRegion": True,
+                "effectiveStartDate": "2026-10-15T00:00:00Z",
+            },
+        ]
+        transport = FakePricingTransport(items)
+        client = PricingClient(transport, currency="GBP")
+
+        # Constrained target SKU resolves parent Standard_E16ds_v5, picks Oct 2026 primary meter
+        # over Feb 2026 and non-primary Nov 2026, and quotes live 3-Year RI + Windows OS surcharge.
+        q_win = client.quote_target_sku("Standard_E16-4ds_v5", 16, "uksouth", os_type="Windows")
+        self.assertAlmostEqual(q_win.payg_hourly_rate, 1.5698, places=4)
+        expected_surcharge = 1.5698 - 1.0166
+        expected_live_ri = round((10151.498 / 26280.0) + expected_surcharge, 4)
+        self.assertAlmostEqual(q_win.ri_3y_hourly_rate, expected_live_ri, places=3)
+        self.assertEqual(q_win.source, "retail-api")

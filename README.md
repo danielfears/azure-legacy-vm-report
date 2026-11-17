@@ -8,25 +8,33 @@ It is a single Python 3 command-line tool with **no third-party dependencies** a
 it changes nothing in Azure.
 
 ```text
-azure-legacy-vm-report --format console,csv,html --open
+azure-legacy-vm-report
 ```
 
 ## Quick start
 
-```sh
-# Try it without touching Azure (synthetic data across two demo tenants)
-./azure-legacy-vm-report --demo --format console,html --open
+```powershell
+# Install once (puts `azure-legacy-vm-report` on your PATH)
+pip install -e .
 
-# Scan the tenant your Azure CLI is currently signed in to
+# Scan your signed-in Azure CLI tenant -> writes & opens the interactive HTML report
 az login --use-device-code --allow-no-subscriptions
-./azure-legacy-vm-report --format console,csv,html --open
+azure-legacy-vm-report
 
-# Scan all logged-in tenants
-./azure-legacy-vm-report --all-tenants --format console,csv,html --open
+# Add extra output formats with simple flags
+azure-legacy-vm-report --csv              # HTML + CSV spreadsheets
+azure-legacy-vm-report --csv --json       # HTML + CSV + JSON
+azure-legacy-vm-report --all              # HTML + CSV + JSON + Markdown + terminal summary
 
-# From WSL, when Microsoft sign-in only works from Windows (Global Secure Access)
-./azure-legacy-vm-report-windows login <tenant-id>
-./azure-legacy-vm-report-windows --tenant <tenant-id> --format console,csv,html --open
+# Try it offline with synthetic data (no Azure login required)
+azure-legacy-vm-report --demo
+```
+
+```sh
+# Or run directly from a checkout without installing:
+# Windows PowerShell:  .\azure-legacy-vm-report.ps1
+# Linux / macOS:       ./azure-legacy-vm-report
+# WSL -> Windows CLI:  ./azure-legacy-vm-report-windows
 ```
 
 ## How legacy v1, v2 and v3 SKUs & workload types are identified
@@ -95,18 +103,17 @@ By default (`--cost-source auto`), the tool queries **both** **Azure Cost Manage
 
 Beyond quantifying the February 2027 price-hike impact, the tool automatically evaluates the **cost and technical readiness of migrating** off legacy SKUs:
 
-- **Post-migration target SKU running cost ("Stay vs Modernise"):** maps every legacy `v1`/`v2`/`v3` size to its concrete 1:1 **compatibility bridge (`v5` / `Bsv2` / `Lsv3`)** and **strategic target (`v6` / `v7` / `Lsv4`)** SKU, quotes live target PAYG and **3-Year RI / Savings Plan** rates, and applies the VM's observed duty cycle (billed hours) and negotiated EA/MCA discount ratio (`ActualCost / Retail`). Shows side-by-side **Current / mo**, **Feb 2027 "Do Nothing" / mo**, **Target v5 PAYG / mo**, **Monthly Savings vs Feb 2027**, and **Target v5 + 3-Year RI/SP / mo**.
-- **Migration Wave Planner & CLI hints:** groups the estate into **Wave 1: Drop-in v5 Resize (SCSI compatible)** (`az vm resize` / `az vmss update`), **Wave 2: Managed Pool Rolling Replace** (`az aks nodepool add`), and **Wave 3: Gen2 / NVMe or Specialised Rebuild (`v6`/`v7`)**.
-- **Live Reserved Instance (RI) coverage & expiry detection:** queries `Microsoft.Capacity/reservations` to flag VMs currently shielded by an active RI (`RI Covered (exp YYYY-MM-DD)`) vs VMs exposed on PAYG where new `v1`/`v2`/`Dv3`/`Ev3` RI purchases and renewals ended on **01/07/2026**.
+- **Post-migration target SKU running cost ("Stay vs Modernise"):** maps every legacy `v1`/`v2`/`v3` size to its concrete 1:1 **compatibility bridge (`Ddsv5` / `Edsv5` / `Dldsv5` / `Bsv2` / `Lsv3`, preserving local temp disks, memory-optimised `D11`–`D15` -> `E`-series RAM, and constrained-core SQL/Oracle active vCPU caps)** and **strategic target (`v6` / `v7` / `Lsv4`)** SKU, quotes live target PAYG and **3-Year RI** rates from the Azure Retail Prices API, and applies the VM's observed duty cycle (billed hours) and negotiated EA/MCA discount ratio (`ActualCost / Retail`). Shows side-by-side **Current / mo**, **Feb 2027 "Do Nothing" / mo**, **Target v5 PAYG / mo**, **Monthly Savings vs Feb 2027**, and **Target v5 + 3-Year RI/SP / mo**.
+- **Migration Wave Planner & CLI hints:** groups the estate into **Wave 1: Drop-in v5 Resize (SCSI + temp-disk compatible)** (`az vm resize` / `az vmss update`), **Wave 2: Managed Pool Rolling Replace** (`az aks nodepool add`), and **Wave 3: Gen2 / NVMe or Specialised Rebuild (`v6`/`v7`)**.
+- **Live Reserved Instance (RI) coverage & expiry detection:** queries `Microsoft.Capacity/reservations` (including Instance Size Flexibility vCPU ratios and Single / Management Group / Shared scopes, prioritising running VMs) to flag VMs currently shielded by an active RI (`RI Covered (exp YYYY-MM-DD)`) vs VMs exposed on PAYG where new `v1`/`v2`/`Dv3`/`Ev3` RI purchases and renewals ended on **01/07/2026**.
 - **Azure Advisor Right-Size + Modernise double-dip:** queries `AdvisorResources` via Azure Resource Graph to surface under-utilised VMs (`Advisor: Right-size to ...`) so teams can right-size and modernise in a single maintenance window.
-- **Regional vCPU family quota pre-flight:** checks `Microsoft.Compute/locations/*/usages` for target `v5` vCPU family headroom (`Quota OK` vs `Quota Increase Needed`).
+- **Regional vCPU family quota pre-flight:** checks `Microsoft.Compute/locations/*/usages` across all candidate subscriptions/regions for cumulative fleet target `v5` vCPU family headroom (`Quota OK` vs `Quota Increase Needed`).
 - **Management Group & Cost-Allocation Tag roll-up:** joins `ResourceContainers` to group subscriptions by Management Group hierarchy and surfaces cost-allocation tags (`CostCentre`, `Service`, `Owner`, `Environment`).
 - **Optional modern regional-hike scope (`--include-regional-skus`):** includes `v4`, `v5`, and `v6` VMs when scanning estates in the 7 EU/APAC regional-hike regions (`northeurope`, `westeurope`, `francecentral`, `francesouth`, `norwayeast`, `norwaywest`, `southeastasia`).
 
 ## Output formats
 
-`--format` accepts `console` (default), `csv`, `json`, `md`, `html` or `all`. Files are written to
-`--out-dir` (default `~/azure-legacy-vm-reports` with `0700` directory and `0600` file permissions):
+Running `azure-legacy-vm-report` with no flags generates and opens the interactive **HTML** report by default. Add `--csv`, `--json`, `--md`, `--console`, or `--all` for extra formats (or use `--format FMT[,FMT]` to pick an exact subset, and `--no-open` to skip opening the browser). Files are written to `--out-dir` (default `~/azure-legacy-vm-reports` with `0700` directory and `0600` file permissions on POSIX):
 
 - `…-vms.csv`: every legacy VM and VM Scale Set with SKU, generation, OS/AHB, power state, hourly rate,
   current monthly cost, February 2027 monthly cost, monthly/annual increase, retirement date and target SKU.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .collect import FETCH_OK, Issue, TenantData
 from .dates import iso_utc
@@ -351,6 +351,8 @@ class TenantReport:
             "modern_resources_skipped": self.data.modern_resources_skipped,
             "cost_management_subs_queried": self.data.cost_management_subs_queried,
             "cost_management_subs_succeeded": self.data.cost_management_subs_succeeded,
+            "observed_discount_pct": self.data.observed_discount_pct,
+            "observed_retail_ratio": self.data.observed_retail_ratio,
             "last_month_label": self.data.last_month_label,
             "current_month_label": self.data.current_month_label,
             "by_generation": {gen: self.by_generation[gen].to_dict() for gen in self.by_generation},
@@ -398,6 +400,30 @@ class Report:
     @property
     def has_cost_management_data(self) -> bool:
         return any(r.actual_last_month_cost is not None for r in self.all_records())
+
+    @property
+    def observed_discount(self) -> Optional[Tuple[float, float]]:
+        """Return ``(discount_pct, retail_ratio)`` when an EA/MCA/MACC discount was observed in actuals."""
+        import re as _re
+        import statistics as _stats
+
+        pcts = [
+            (t.data.observed_discount_pct, t.data.observed_retail_ratio)
+            for t in self.tenants
+            if t.fetched and t.data.observed_discount_pct is not None and t.data.observed_retail_ratio is not None
+        ]
+        if pcts:
+            med_pct = round(_stats.median([p[0] for p in pcts]), 1)
+            med_rat = round(_stats.median([p[1] for p in pcts]), 3)
+            return med_pct, med_rat
+        # Fallback for TenantData loaded from older issues list
+        for t in self.tenants:
+            for iss in t.issues:
+                if iss.feature == "negotiated-discount":
+                    m = _re.search(r"~([\d.]+)%.*?\(([\d.]+)x retail\)", iss.message)
+                    if m:
+                        return float(m.group(1)), float(m.group(2))
+        return None
 
     @property
     def cost_basis_description(self) -> str:

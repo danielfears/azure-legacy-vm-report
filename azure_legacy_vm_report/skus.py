@@ -85,6 +85,26 @@ _STD_E_VCPUS = (2, 4, 8, 16, 20, 32, 48, 64, 96)
 _STD_L_VCPUS = (8, 16, 32, 48, 64, 80)
 _STD_B_VCPUS = (2, 4, 8, 16, 32)
 
+# Supported constrained-core active vCPU counts per billed E-series vCPU size in Edsv5/Esv5/Esv6.
+_CONSTRAINED_E_ACTIVE: Dict[int, Tuple[int, ...]] = {
+    4: (2,),
+    8: (2, 4),
+    16: (4, 8),
+    32: (8, 16),
+    48: (24,),
+    64: (16, 32),
+    96: (24, 48),
+}
+
+_D11_TO_D15_RE = re.compile(
+    r"^(?:STANDARD_|BASIC_)?DS?1[1-5](?:-\d+)?(?:_V[12])?$",
+    re.IGNORECASE,
+)
+_MOD_D_TEMP_DISK_RE = re.compile(
+    r"^(?:STANDARD_|BASIC_)?[A-Z]+\d+(?:-\d+)?[A-Z]*D[A-Z]*(?:_[A-Z0-9]+)*_V[4567]$",
+    re.IGNORECASE,
+)
+
 
 def _snap_size(vcpus: int, allowed: Tuple[int, ...]) -> int:
     for val in allowed:
@@ -93,42 +113,94 @@ def _snap_size(vcpus: int, allowed: Tuple[int, ...]) -> int:
     return allowed[-1]
 
 
-def _resolve_concrete_targets(sku: str, series: str, vcpus: int) -> Tuple[str, str, str]:
+def is_memory_optimised_d_v1_v2(sku_or_body: str) -> bool:
+    """True for D11-D15 and DS11-DS15 (v1/v2), which carry 7 GiB RAM/vCPU and map to E-series."""
+    return bool(_D11_TO_D15_RE.match((sku_or_body or "").strip()))
+
+
+def has_local_temp_disk(sku: str, series: str, generation: str) -> bool:
+    """True when the SKU includes a local temporary resource disk (requiring a 'd' v5 target for az vm resize)."""
+    ser = (series or "").strip()
+    gen = (generation or "").strip().lower()
+    if ser in ("Bsv2", "Basv2", "Bpsv2", "DCsv3"):
+        return False
+    if gen in (GEN_V4, GEN_V5, GEN_V6):
+        return bool(_MOD_D_TEMP_DISK_RE.match((sku or "").strip()))
+    return True
+
+
+def _resolve_constrained_e_skus(vcpus: int, active_vcpus: int, *, temp_disk: bool) -> Tuple[str, str, str]:
+    """Map a constrained-core legacy SKU to a matching constrained-core Edsv5/Esv5 and Esv6 SKU."""
+    candidates = sorted(size for size in _CONSTRAINED_E_ACTIVE if size >= max(4, vcpus))
+    e_n = candidates[0] if candidates else 96
+    allowed_act = _CONSTRAINED_E_ACTIVE[e_n]
+    act = _snap_size(max(2, active_vcpus), allowed_act)
+    v5_mod = "ds" if temp_disk else "s"
+    q_fam = "standardEDSv5Family" if temp_disk else "standardESv5Family"
+    return f"Standard_E{e_n}-{act}{v5_mod}_v5", f"Standard_E{e_n}-{act}s_v6", q_fam
+
+
+def _resolve_concrete_targets(
+    sku: str,
+    series: str,
+    vcpus: int,
+    active_vcpus: Optional[int] = None,
+    generation: str = "",
+) -> Tuple[str, str, str]:
     """Return ``(target_v5_sku, target_current_sku, target_quota_family)`` for a legacy SKU."""
     up_sku = (sku or "").upper()
     ser = (series or "").strip()
+    eff_active = vcpus if active_vcpus is None or active_vcpus <= 0 else active_vcpus
+    is_constrained = eff_active < vcpus
+    temp_disk = has_local_temp_disk(sku, ser, generation)
+
     d_n = _snap_size(max(2, vcpus), _STD_D_VCPUS)
     e_n = _snap_size(max(2, vcpus), _STD_E_VCPUS)
     l_n = _snap_size(max(8, vcpus), _STD_L_VCPUS)
     b_n = _snap_size(max(2, vcpus), _STD_B_VCPUS)
 
     if ser in ("Bsv2", "Basv2", "Bpsv2"):
-        return sku, sku, "standardBSv2Family"
+        return sku, f"Standard_D{d_n}s_v6", "standardBSv2Family"
 
     if ser == "Bv1":
-        if "B1LS" in up_sku:
+        if up_sku.endswith(("_B1LS", "_B1S")):
             v5_sku = "Standard_B2ts_v2"
-        elif "B1S" in up_sku or "B2S" in up_sku:
+            v6_sku = "Standard_D2ls_v6"
+        elif up_sku.endswith(("_B1MS", "_B2S")):
             v5_sku = "Standard_B2ls_v2"
+            v6_sku = "Standard_D2ls_v6"
         else:
             v5_sku = f"Standard_B{b_n}s_v2"
-        return v5_sku, v5_sku, "standardBSv2Family"
+            v6_sku = f"Standard_D{d_n}s_v6"
+        return v5_sku, v6_sku, "standardBSv2Family"
 
     if ser in ("Av1", "Basic_A", "Av2"):
         if vcpus <= 2:
-            return "Standard_B2s_v2", "Standard_D2ls_v6", "standardBSv2Family"
-        return f"Standard_D{d_n}ls_v5", f"Standard_D{d_n}ls_v6", "standardDlsv5Family"
+            return "Standard_D2lds_v5", "Standard_D2ls_v6", "standardDldsv5Family"
+        return f"Standard_D{d_n}lds_v5", f"Standard_D{d_n}ls_v6", "standardDldsv5Family"
 
-    if ser in ("Amv2", "Ev3", "Esv3", "G", "Gs", "Ev4", "Esv4"):
+    if is_constrained and ser in (
+        "D", "Ds", "Dv1", "Dsv1", "Dv2", "Dsv2", "Dv3", "Dsv3",
+        "Amv2", "Ev3", "Esv3", "G", "Gs", "Ev4", "Esv4",
+    ):
+        return _resolve_constrained_e_skus(vcpus, eff_active, temp_disk=temp_disk)
+
+    if is_memory_optimised_d_v1_v2(sku) or ser in ("Amv2", "Ev3", "Esv3", "G", "Gs", "Ev4", "Esv4"):
+        if temp_disk:
+            return f"Standard_E{e_n}ds_v5", f"Standard_E{e_n}s_v6", "standardEDSv5Family"
         return f"Standard_E{e_n}s_v5", f"Standard_E{e_n}s_v6", "standardESv5Family"
 
     if ser in ("F", "Fs", "Fsv2"):
+        if temp_disk:
+            return f"Standard_D{d_n}lds_v5", f"Standard_F{d_n}als_v6", "standardDldsv5Family"
         return f"Standard_D{d_n}ls_v5", f"Standard_F{d_n}als_v6", "standardDlsv5Family"
 
     if ser in ("Ls", "Lsv1", "Lsv2", "Lsv3", "Lasv3"):
         return f"Standard_L{l_n}s_v3", f"Standard_L{l_n}s_v4", "standardLsv3Family"
 
     if ser in ("DCs", "DCsv2", "DCsv3", "DCdsv3"):
+        if ser == "DCdsv3":
+            return f"Standard_DC{d_n}ads_v5", f"Standard_DC{d_n}ads_v6", "standardDCadsv5Family"
         return f"Standard_DC{d_n}as_v5", f"Standard_DC{d_n}as_v6", "standardDCasv5Family"
 
     if ser in ("HB", "HBv2", "HC", "H"):
@@ -138,9 +210,16 @@ def _resolve_concrete_targets(sku: str, series: str, vcpus: int) -> Tuple[str, s
         m_n = _snap_size(max(32, vcpus), (32, 64, 128, 192))
         return f"Standard_M{m_n}s_v2", f"Standard_M{m_n}s_v3", "standardMSv2Family"
 
-    if ser in ("NP", "NVv3", "NCv3", "NCasT4_v3", "NC", "ND", "NV"):
-        return "Standard_NV36ads_A10_v5", "Standard_NC24ads_A100_v4", "standardNVadsA10v5Family"
+    if ser == "NCasT4_v3":
+        return sku, "Standard_NV12ads_A10_v5", "standardNVadsA10v5Family"
 
+    if ser in ("NP", "NVv3", "NCv3", "NCv2", "NDv2", "NVv2", "NC", "ND", "NV"):
+        nv_n = _snap_size(max(6, vcpus), (6, 12, 18, 36, 72))
+        v6_gpu = "Standard_NC24ads_A100_v4" if vcpus >= 24 or ser in ("NC", "NCv2", "NCv3", "ND", "NDv2", "NP") else f"Standard_NV{nv_n}ads_A10_v5"
+        return f"Standard_NV{nv_n}ads_A10_v5", v6_gpu, "standardNVadsA10v5Family"
+
+    if temp_disk:
+        return f"Standard_D{d_n}ds_v5", f"Standard_D{d_n}s_v6", "standardDDSv5Family"
     return f"Standard_D{d_n}s_v5", f"Standard_D{d_n}s_v6", "standardDSv5Family"
 
 
@@ -148,7 +227,7 @@ def _is_ri_purchase_blocked(generation: str, series: str, in_global_25_notice: b
     """True when Microsoft ended new 1Y/3Y RI purchases & renewals on 01/07/2026."""
     if in_global_25_notice or generation == GEN_V1:
         return True
-    if series in ("Dv3", "Dsv3", "Ev3", "Esv3", "DCsv3", "DCdsv3", "NVv3", "NCv3"):
+    if series in ("Dv3", "Dsv3", "Ev3", "Esv3", "DCsv3", "DCdsv3", "NVv3", "NCv3", "NCv2", "NDv2", "NVv2"):
         return True
     return False
 
@@ -174,7 +253,13 @@ class SkuInfo:
     ri_purchase_blocked: bool = False
 
     def __post_init__(self) -> None:
-        v5_sku, cur_sku, q_fam = _resolve_concrete_targets(self.sku, self.series, self.vcpus)
+        v5_sku, cur_sku, q_fam = _resolve_concrete_targets(
+            self.sku,
+            self.series,
+            self.vcpus,
+            self.active_vcpus,
+            self.generation,
+        )
         if not self.target_v5_sku:
             object.__setattr__(self, "target_v5_sku", v5_sku)
         if not self.target_current_sku:
@@ -211,6 +296,20 @@ def _canonicalise_sku_body(body_raw: str) -> str:
 def parent_unconstrained_sku(sku: str) -> str:
     """Return the parent full-core SKU for a constrained-core SKU (e.g. Standard_E16-4s_v3 -> Standard_E16s_v3)."""
     return re.sub(r"(\d+)-\d+", r"\1", sku)
+
+
+def diskless_pool_v5_sku(v5_sku: str, quota_family: str) -> Tuple[str, str]:
+    """Convert a temp-disk Wave 1 v5 SKU (e.g. Standard_D8ds_v5) to its diskless Wave 2 pool equivalent."""
+    sku = (v5_sku or "").strip()
+    qfam = (quota_family or "").strip()
+    converted = re.sub(r"^Standard_([DE]\d+(?:-\d+)?)ds_v5$", r"Standard_\1s_v5", sku)
+    if converted != sku:
+        new_q = "standardESv5Family" if converted.startswith("Standard_E") else "standardDSv5Family"
+        return converted, new_q
+    converted_l = re.sub(r"^Standard_(D\d+)lds_v5$", r"Standard_\1ls_v5", sku)
+    if converted_l != sku:
+        return converted_l, "standardDlsv5Family"
+    return sku, qfam
 
 
 def classify_vm_sku(raw_sku: str, *, include_modern_regional: bool = False) -> Optional[SkuInfo]:
@@ -417,6 +516,24 @@ def _classify_versioned(canonical: str, body: str, gen: str) -> SkuInfo:
                 recommended_v5="HBv3 / HBv4",
                 recommended_current="HBv5 / HX",
                 disk_controller_note="Retires 31/05/2027; validate MPI and InfiniBand NDR/HDR",
+                in_global_25_notice=True,
+            )
+        if up.startswith(("NC", "ND", "NV")):
+            vcpus, active = _extract_vcpus(up, up[:2])
+            fam2 = f"{up[:2]}v2"
+            return SkuInfo(
+                sku=canonical,
+                parent_sku=parent,
+                generation=GEN_V2,
+                series=fam2,
+                category="GPU accelerated",
+                vcpus=vcpus,
+                active_vcpus=active,
+                lifecycle_stage=STAGE_RETIRED,
+                retirement_date="30/09/2023",
+                recommended_v5="NVadsA10_v5 / NCads_H100_v5",
+                recommended_current="NCads_H100_v5 / NCv6",
+                disk_controller_note="Retired v2 GPU series; rebuild on modern GPU SKU and validate CUDA drivers",
                 in_global_25_notice=True,
             )
         if up.startswith("M"):
@@ -837,27 +954,34 @@ def _build_b_v1(canonical: str, parent: str, vcpus: int, active: int) -> SkuInfo
         active_vcpus=active,
         lifecycle_stage=STAGE_EOL,
         retirement_date="15/11/2028",
-        recommended_v5="Bsv2 / Basv2 / Dlsv5 / Dalsv5",
+        recommended_v5="Bsv2 / Basv2 / Dldsv5 / Dadsv5",
         recommended_current="Dlsv6 / Dalsv6",
-        disk_controller_note="Bsv2/Basv2 keep SCSI (note: Bsv2/Basv2 not in sovereign clouds); v6 requires Gen2 + NVMe",
+        disk_controller_note=(
+            "Bsv2/Basv2 keep SCSI but omit local temp disk (use Dldsv5 for in-place temp-disk resize; "
+            "Bsv2/Basv2 not in sovereign clouds); v6 requires Gen2 + NVMe"
+        ),
         in_global_25_notice=True,
     )
 
 
 def _build_d_v1_v2(canonical: str, parent: str, gen: str, series: str, vcpus: int, active: int) -> SkuInfo:
     retire = "15/11/2028" if series in ("Dv1", "Dsv1") else "01/05/2028"
+    mem_opt = is_memory_optimised_d_v1_v2(canonical)
     return SkuInfo(
         sku=canonical,
         parent_sku=parent,
         generation=gen,
         series=series,
-        category="General purpose",
+        category="Memory optimised" if mem_opt else "General purpose",
         vcpus=vcpus,
         active_vcpus=active,
         lifecycle_stage=STAGE_EOL,
         retirement_date=retire,
-        recommended_v5="Dsv5 / Ddsv5 / Dasv5 / Dadsv5",
-        recommended_current="Dsv6 / Ddsv6 / Dasv6 / Dadsv7",
-        disk_controller_note="v5 keeps SCSI (enable AccelNet before resize); v6/v7 require Gen2 + NVMe + MANA",
+        recommended_v5="Edsv5 / Esv5 / Eadsv5" if mem_opt else "Ddsv5 / Dsv5 / Dadsv5",
+        recommended_current="Edsv6 / Esv6 / Eadsv6" if mem_opt else "Dsv6 / Ddsv6 / Dasv6 / Dadsv7",
+        disk_controller_note=(
+            "Ddsv5/Edsv5 preserve SCSI + local temp disk for in-place resize (enable AccelNet first); "
+            "v6/v7 require Gen2 + NVMe + MANA"
+        ),
         in_global_25_notice=True,
     )

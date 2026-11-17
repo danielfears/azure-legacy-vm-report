@@ -35,12 +35,20 @@ from .model import (
     LegacyVmRecord,
     NameMaps,
     build_legacy_record,
+    is_managed_pool_kind,
+    is_power_state_billed,
     normalise_os_type,
     normalise_power_state,
     normalise_priority,
 )
 from .pricing import DEFAULT_HOURS_PER_MONTH, HikePolicy, PricingClient
-from .skus import LEGACY_GENERATIONS, SkuInfo, classify_vm_sku
+from .skus import (
+    LEGACY_GENERATIONS,
+    SkuInfo,
+    classify_vm_sku,
+    diskless_pool_v5_sku,
+    parent_unconstrained_sku,
+)
 from .transport import Transport
 
 log = logging.getLogger("azure_legacy_vm_report.collect")
@@ -133,6 +141,8 @@ class TenantData:
     modern_resources_skipped: int = 0
     cost_management_subs_queried: int = 0
     cost_management_subs_succeeded: int = 0
+    observed_discount_pct: Optional[float] = None
+    observed_retail_ratio: Optional[float] = None
     last_month_label: str = ""
     current_month_label: str = ""
     records: List[LegacyVmRecord] = field(default_factory=list)
@@ -185,8 +195,10 @@ def collect_tenant(
     target_subs = _resolve_target_subscriptions(data, names, options.subscription_filter)
 
     raw_rows: Optional[List[Dict[str, Any]]] = None
+    arg_succeeded = False
     if options.use_resource_graph:
         raw_rows = _try_resource_graph(client, data, target_subs, options)
+        arg_succeeded = raw_rows is not None
 
     if raw_rows is None:
         raw_rows = _collect_via_compute_arm(client, data, names, target_subs, options)
@@ -251,23 +263,12 @@ def collect_tenant(
             subs_with_legacy.setdefault(sub_id, []).append(rid)
 
     catalog = ScheduleCatalog()
-    if options.use_resource_graph:
+    if arg_succeeded:
         catalog = fetch_schedule_catalog(
             client,
             target_subs if target_subs else None,
             api_version=options.resource_graph_api,
         )
-        if candidates:
-            catalog.reservations = fetch_active_vm_reservations(client)
-            sub_region_pairs = [
-                (sub_id, str(r.get("location") or "uksouth").strip().lower())
-                for r, _, _, sub_id, _ in candidates
-            ]
-            catalog.quota_by_sub_region_family = fetch_subscription_compute_quotas(
-                client,
-                sub_region_pairs,
-                api_version=options.compute_api,
-            )
 
     # Also check AKS agentPoolProfiles for any legacy node pools that have no backing VMSS in raw_rows
     for pool in catalog.aks_pools:
@@ -303,6 +304,18 @@ def collect_tenant(
             }
             candidates.append((synth_row, sku_info, True, pool.subscription_id, pool.count))
 
+    if candidates:
+        catalog.reservations = fetch_active_vm_reservations(client)
+        sub_region_pairs = [
+            (sub_id, str(r.get("location") or "uksouth").strip().lower())
+            for r, _, _, sub_id, _ in candidates
+        ]
+        catalog.quota_by_sub_region_family = fetch_subscription_compute_quotas(
+            client,
+            sub_region_pairs,
+            api_version=options.compute_api,
+        )
+
     usage_by_rid: Dict[str, ActualVmUsage] = {}
     if candidates and options.cost_source != COST_SOURCE_RETAIL:
         cm_client = ArmClient(
@@ -312,10 +325,14 @@ def collect_tenant(
         # Query subscriptions with the largest active legacy vCPU footprint first.
         # Only query subscriptions that have at least one resource (active or deallocated).
         sub_vcpus: Dict[str, int] = {}
+        inst_counts_by_sub: Dict[str, Dict[str, int]] = {}
         for row, sku_info, is_vmss, sub_id, capacity in candidates:
             pstate = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
             weight = sku_info.vcpus * max(1, capacity) * (10 if pstate != "Deallocated" else 1)
             sub_vcpus[sub_id] = sub_vcpus.get(sub_id, 0) + weight
+            rid_str = str(row.get("id") or "").strip().lower()
+            if rid_str and sub_id:
+                inst_counts_by_sub.setdefault(sub_id, {})[rid_str] = max(1, capacity)
 
         ordered_subs = sorted(subs_with_legacy.keys(), key=lambda s: (-sub_vcpus.get(s, 0), s))
 
@@ -326,6 +343,7 @@ def collect_tenant(
                 subs_with_legacy[sub_id],
                 window,
                 api_version=options.cost_management_api,
+                instance_counts_by_rid=inst_counts_by_sub.get(sub_id),
             )
             return sub_id, u_map, err_msg
 
@@ -340,6 +358,7 @@ def collect_tenant(
             cm_results.append(_query_one_sub(sub_id))
 
         throttled_count = 0
+        mismatched_currencies: Set[str] = set()
         for sub_id, sub_usage, warn in cm_results:
             if warn:
                 if "429" in warn or "TooManyRequests" in warn or "throttled" in warn.lower():
@@ -351,8 +370,27 @@ def collect_tenant(
                         f"{warn}; using schedule-adjusted Retail rates for {names.subscription_label(sub_id)}.",
                     ))
             else:
-                data.cost_management_subs_succeeded += 1
-                usage_by_rid.update(sub_usage)
+                sub_mismatch = {
+                    u.currency.upper()
+                    for u in sub_usage.values()
+                    if u.currency and u.currency.upper() != pricing.currency.upper()
+                }
+                if sub_mismatch:
+                    mismatched_currencies.update(sub_mismatch)
+                else:
+                    data.cost_management_subs_succeeded += 1
+                    usage_by_rid.update(sub_usage)
+
+        if mismatched_currencies:
+            found_cur = ", ".join(sorted(mismatched_currencies))
+            suggested_cur = sorted(mismatched_currencies)[0]
+            data.issues.append(Issue(
+                LEVEL_WARNING,
+                "cost-management-currency",
+                f"Cost Management returned billed spend in {found_cur} while --currency {pricing.currency} was "
+                f"requested; re-run with --currency {suggested_cur} to use actual billed costs (using "
+                f"{pricing.currency} schedule-adjusted Retail rates instead).",
+            ))
 
         if throttled_count:
             data.issues.append(Issue(
@@ -363,9 +401,95 @@ def collect_tenant(
                 "using schedule-adjusted Retail rates for the remainder.",
             ))
 
-    for row, sku_info, is_vmss, sub_id, capacity in candidates:
+    # Concurrently pre-warm Retail Prices API cache for all unique (region, sku) pairs
+    # and resolve workload deployment kind + Wave 2 diskless pool targets upfront.
+    price_pairs: List[Tuple[str, str]] = []
+    resolved_workloads: List[Tuple[str, str, float, str, str]] = []
+    for row, sku_info, _, sub_id, _ in candidates:
+        rid_str = str(row.get("id") or "")
+        reg_l = str(row.get("location") or "uksouth").strip().lower()
+        tags_raw = row.get("tags") if isinstance(row.get("tags"), dict) else {}
+        sched_inf = catalog.by_resource_id.get(rid_str.lower())
+        dep_kind, sched_sum, inf_hrs = infer_workload_and_schedule(
+            resource_type_raw=str(row.get("type") or ""),
+            name=str(row.get("name") or ""),
+            resource_group=str(row.get("resourceGroup") or ""),
+            subscription_id=sub_id,
+            tags=tags_raw,
+            schedule_info=sched_inf,
+            aks_pools_by_key=catalog.aks_pools_by_key,
+            default_hours=options.hours_per_month,
+        )
+        if is_managed_pool_kind(dep_kind):
+            eff_v5_sku, eff_q_fam = diskless_pool_v5_sku(sku_info.target_v5_sku, sku_info.target_quota_family)
+        else:
+            eff_v5_sku, eff_q_fam = sku_info.target_v5_sku, sku_info.target_quota_family
+        resolved_workloads.append((dep_kind, sched_sum, inf_hrs, eff_v5_sku, eff_q_fam))
+        for cand_sku in (
+            sku_info.sku,
+            sku_info.parent_sku,
+            eff_v5_sku,
+            parent_unconstrained_sku(eff_v5_sku),
+            sku_info.target_current_sku,
+            parent_unconstrained_sku(sku_info.target_current_sku),
+        ):
+            if cand_sku:
+                price_pairs.append((reg_l, cand_sku))
+    pricing.prewarm(price_pairs)
+
+    # Pre-calculate cumulative target vCPU quota demand per (subscription, region, target_quota_family)
+    # and match Reserved Instances in Running-first, largest-vCPU-first priority order.
+    fleet_quota_demand: Dict[Tuple[str, str, str], int] = {}
+    target_vcpu_cache: Dict[str, int] = {}
+    for idx_c, (row, sku_info, is_vmss, sub_id, capacity) in enumerate(candidates):
+        reg_l = str(row.get("location") or "uksouth").strip().lower()
+        _, _, _, eff_v5_sku, eff_q_fam = resolved_workloads[idx_c]
+        fam_l = (eff_q_fam or "").strip().lower()
+        pstate = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
+        if eff_v5_sku not in target_vcpu_cache:
+            tgt_info = classify_vm_sku(eff_v5_sku, include_modern_regional=True)
+            target_vcpu_cache[eff_v5_sku] = tgt_info.vcpus if tgt_info is not None else sku_info.vcpus
+        per_inst_vcpus = max(sku_info.vcpus, target_vcpu_cache[eff_v5_sku])
+        if fam_l and is_power_state_billed(pstate) and capacity > 0:
+            q_key = (sub_id, reg_l, fam_l)
+            fleet_quota_demand[q_key] = fleet_quota_demand.get(q_key, 0) + (per_inst_vcpus * capacity)
+
+    ri_match_by_idx: Dict[int, Tuple[str, str]] = {}
+    ri_order = sorted(
+        range(len(candidates)),
+        key=lambda idx: (
+            0
+            if is_power_state_billed(
+                normalise_power_state(
+                    candidates[idx][0].get("powerState"),
+                    capacity=candidates[idx][4] if candidates[idx][2] else None,
+                )
+            )
+            and candidates[idx][4] > 0
+            else 1,
+            -(candidates[idx][1].vcpus * max(1, candidates[idx][4])),
+            idx,
+        ),
+    )
+    for idx in ri_order:
+        row, sku_info, is_vmss, sub_id, capacity = candidates[idx]
+        reg_l = str(row.get("location") or "uksouth").strip().lower()
+        pstate = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
+        ri_match_by_idx[idx] = match_reservation_for_vm(
+            catalog.reservations,
+            subscription_id=sub_id,
+            region=reg_l,
+            sku=sku_info.sku,
+            parent_sku=sku_info.parent_sku,
+            instance_count=capacity,
+            ri_purchase_blocked=sku_info.ri_purchase_blocked,
+            vcpus_per_instance=sku_info.vcpus,
+            power_state=pstate,
+            mg_ancestors=catalog.mg_ancestors_by_sub.get(sub_id),
+        )
+
+    for idx, (row, sku_info, is_vmss, sub_id, capacity) in enumerate(candidates):
         rid = str(row.get("id") or "")
-        rtype_raw = str(row.get("type") or "")
         rname = str(row.get("name") or "")
         rg_name = str(row.get("resourceGroup") or "")
         region = str(row.get("location") or "uksouth").strip().lower()
@@ -375,17 +499,7 @@ def collect_tenant(
         power_state = normalise_power_state(row.get("powerState"), capacity=capacity if is_vmss else None)
         tags = row.get("tags") if isinstance(row.get("tags"), dict) else {}
         sched_info = catalog.by_resource_id.get(rid.lower())
-
-        deployment_kind, schedule_summary, inferred_hours = infer_workload_and_schedule(
-            resource_type_raw=rtype_raw,
-            name=rname,
-            resource_group=rg_name,
-            subscription_id=sub_id,
-            tags=tags,
-            schedule_info=sched_info,
-            aks_pools_by_key=catalog.aks_pools_by_key,
-            default_hours=options.hours_per_month,
-        )
+        deployment_kind, schedule_summary, inferred_hours, eff_v5_sku, eff_q_fam = resolved_workloads[idx]
 
         quote = pricing.quote(
             sku_info,
@@ -395,7 +509,7 @@ def collect_tenant(
             priority=priority,
         )
         target_v5_quote = pricing.quote_target_sku(
-            sku_info.target_v5_sku,
+            eff_v5_sku,
             sku_info.vcpus,
             region,
             os_type=os_type,
@@ -412,22 +526,24 @@ def collect_tenant(
         )
         mg_label = catalog.management_groups_by_sub.get(sub_id, "Tenant Root")
         cost_tag = extract_cost_allocation_tag(tags)
-        ri_status, ri_expiry = match_reservation_for_vm(
-            catalog.reservations,
-            subscription_id=sub_id,
-            region=region,
-            sku=sku_info.sku,
-            parent_sku=sku_info.parent_sku,
-            instance_count=capacity,
-            ri_purchase_blocked=sku_info.ri_purchase_blocked,
-        )
+        ri_status, ri_expiry = ri_match_by_idx[idx]
         adv_info = catalog.advisor_by_resource_id.get(rid.lower())
+        fam_l = (eff_q_fam or "").strip().lower()
+        per_inst_vcpus = max(sku_info.vcpus, target_vcpu_cache.get(eff_v5_sku, sku_info.vcpus))
+        this_needed_vcpus = per_inst_vcpus * max(1, capacity)
+        active_fleet_vcpus = fleet_quota_demand.get((sub_id, region, fam_l), 0)
+        eff_fleet_vcpus = (
+            active_fleet_vcpus
+            if is_power_state_billed(power_state) and capacity > 0
+            else active_fleet_vcpus + this_needed_vcpus
+        )
         q_status = evaluate_quota_headroom(
             catalog.quota_by_sub_region_family,
             subscription_id=sub_id,
             region=region,
-            target_quota_family=sku_info.target_quota_family,
-            needed_vcpus=sku_info.vcpus * max(1, capacity),
+            target_quota_family=eff_q_fam,
+            needed_vcpus=this_needed_vcpus,
+            fleet_needed_vcpus=eff_fleet_vcpus,
         )
         record = build_legacy_record(
             resource_id=rid,
@@ -485,6 +601,8 @@ def collect_tenant(
         med_ratio = statistics.median(discount_ratios)
         disc_pct = round((1.0 - med_ratio) * 100.0, 1)
         if disc_pct >= 2.0:
+            data.observed_discount_pct = disc_pct
+            data.observed_retail_ratio = round(med_ratio, 3)
             data.issues.append(Issue(
                 LEVEL_INFO,
                 "negotiated-discount",
@@ -660,6 +778,7 @@ def _normalise_arm_vm(vm: Mapping[str, Any], sub_id: str) -> Dict[str, Any]:
     hw = props.get("hardwareProfile") if isinstance(props.get("hardwareProfile"), dict) else {}
     storage = props.get("storageProfile") if isinstance(props.get("storageProfile"), dict) else {}
     os_disk = storage.get("osDisk") if isinstance(storage.get("osDisk"), dict) else {}
+    vmss_ref = props.get("virtualMachineScaleSet") if isinstance(props.get("virtualMachineScaleSet"), dict) else {}
     iview = props.get("instanceView") if isinstance(props.get("instanceView"), dict) else {}
     statuses = iview.get("statuses") if isinstance(iview.get("statuses"), list) else []
     power_code = ""
@@ -675,6 +794,7 @@ def _normalise_arm_vm(vm: Mapping[str, Any], sub_id: str) -> Dict[str, Any]:
         "resourceGroup": _resource_group_from_id(rid),
         "location": str(vm.get("location") or ""),
         "tags": vm.get("tags") if isinstance(vm.get("tags"), dict) else {},
+        "vmssId": str(vmss_ref.get("id") or "").strip().lower(),
         "vmSize": str(hw.get("vmSize") or ""),
         "osType": str(os_disk.get("osType") or ""),
         "licenseType": str(props.get("licenseType") or ""),

@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .skus import GEN_V1, GEN_V2, GEN_V3, SkuInfo, classify_vm_sku
+from .skus import GEN_V1, GEN_V2, GEN_V3, SkuInfo, classify_vm_sku, parent_unconstrained_sku
 from .transport import Transport, TransportError
 
 log = logging.getLogger("azure_legacy_vm_report.pricing")
 
 DEFAULT_HOURS_PER_MONTH = 730.0
+HOURS_IN_3_YEARS = 36.0 * DEFAULT_HOURS_PER_MONTH  # 26,280 hours
 DEFAULT_CURRENCY = "GBP"
 RETAIL_PRICES_ENDPOINT = "https://prices.azure.com/api/retail/prices"
+_MAX_PRICE_PAGES = 5
 
 POLICY_LEGACY_25 = "legacy-25"
 POLICY_SERVICE_HEALTH = "service-health"
@@ -79,29 +83,44 @@ _SERIES_PER_VCPU_GBP: Dict[str, Tuple[float, float]] = {
     "NP": (0.1250, 0.1590),
     "M": (0.1150, 0.1490),
     "Msv2/Mdsv2": (0.1250, 0.1590),
+    "NC": (0.2800, 0.3140),
+    "ND": (0.3200, 0.3540),
+    "NV": (0.1600, 0.1940),
+    "NCv2": (0.3400, 0.3740),
+    "NDv2": (0.3900, 0.4240),
+    "NVv2": (0.1400, 0.1740),
     "NVv3": (0.0950, 0.1290),
     "NCv3": (0.3800, 0.4140),
     "NCasT4_v3": (0.0820, 0.1160),
     # Modern v4/v5/v6 target & regional-hike series
     "Dv4": (0.0427, 0.0766),
     "Dsv4": (0.0427, 0.0766),
+    "Ddsv4": (0.0493, 0.0838),
     "Ev4": (0.0574, 0.0913),
     "Esv4": (0.0574, 0.0913),
+    "Edsv4": (0.0635, 0.0981),
     "Dv5": (0.0427, 0.0766),
     "Dsv5": (0.0427, 0.0766),
+    "Ddsv5": (0.0493, 0.0838),
     "Dlsv5": (0.0362, 0.0701),
+    "Dldsv5": (0.0432, 0.0778),
     "Ev5": (0.0574, 0.0913),
     "Esv5": (0.0574, 0.0913),
+    "Edsv5": (0.0635, 0.0981),
     "Dv6": (0.0448, 0.0787),
     "Dsv6": (0.0448, 0.0787),
+    "Ddsv6": (0.0516, 0.0862),
     "Dlsv6": (0.0378, 0.0717),
     "Ev6": (0.0602, 0.0941),
     "Esv6": (0.0602, 0.0941),
+    "Edsv6": (0.0667, 0.1013),
     "Fsv6": (0.0378, 0.0717),
     "Falsv6": (0.0378, 0.0717),
     "Lsv4": (0.0595, 0.0935),
     "DCasv5": (0.0480, 0.0820),
+    "DCadsv5": (0.0540, 0.0880),
     "DCasv6": (0.0500, 0.0840),
+    "DCadsv6": (0.0560, 0.0900),
 }
 
 # Exact verified UK South hourly rates in GBP (and USD via 1.36215 conversion when needed)
@@ -210,13 +229,13 @@ _EXACT_UKS_GBP: Dict[str, Tuple[float, float]] = {
     "Standard_L64s_v2": (3.9680, 6.1440),
     "Standard_L80s_v2": (4.9600, 7.6800),
     # Target v5 & v6 SKUs (UK South GBP/hr: Linux, Windows)
-    "Standard_B2ts_v2": (0.0084, 0.0144),
-    "Standard_B2ls_v2": (0.0168, 0.0236),
-    "Standard_B2s_v2": (0.0336, 0.0404),
-    "Standard_B4s_v2": (0.0672, 0.0808),
-    "Standard_B8s_v2": (0.1344, 0.1616),
-    "Standard_B16s_v2": (0.2688, 0.3232),
-    "Standard_B32s_v2": (0.5376, 0.6464),
+    "Standard_B2ts_v2": (0.0089, 0.0158),
+    "Standard_B2ls_v2": (0.0355, 0.0424),
+    "Standard_B2s_v2": (0.0710, 0.0782),
+    "Standard_B4s_v2": (0.1420, 0.1564),
+    "Standard_B8s_v2": (0.2840, 0.3128),
+    "Standard_B16s_v2": (0.5680, 0.6256),
+    "Standard_B32s_v2": (1.1360, 1.2512),
     "Standard_D2s_v5": (0.0854, 0.1531),
     "Standard_D4s_v5": (0.1708, 0.3063),
     "Standard_D8s_v5": (0.3416, 0.6126),
@@ -225,6 +244,14 @@ _EXACT_UKS_GBP: Dict[str, Tuple[float, float]] = {
     "Standard_D48s_v5": (2.0496, 3.6756),
     "Standard_D64s_v5": (2.7328, 4.9008),
     "Standard_D96s_v5": (4.0992, 7.3512),
+    "Standard_D2ds_v5": (0.0985, 0.1677),
+    "Standard_D4ds_v5": (0.1970, 0.3353),
+    "Standard_D8ds_v5": (0.3940, 0.6706),
+    "Standard_D16ds_v5": (0.7880, 1.3412),
+    "Standard_D32ds_v5": (1.5760, 2.6824),
+    "Standard_D48ds_v5": (2.3640, 4.0236),
+    "Standard_D64ds_v5": (3.1520, 5.3648),
+    "Standard_D96ds_v5": (4.7280, 8.0472),
     "Standard_D2ls_v5": (0.0724, 0.1402),
     "Standard_D4ls_v5": (0.1448, 0.2804),
     "Standard_D8ls_v5": (0.2896, 0.5608),
@@ -233,6 +260,14 @@ _EXACT_UKS_GBP: Dict[str, Tuple[float, float]] = {
     "Standard_D48ls_v5": (1.7376, 3.3648),
     "Standard_D64ls_v5": (2.3168, 4.4864),
     "Standard_D96ls_v5": (3.4752, 6.7296),
+    "Standard_D2lds_v5": (0.0865, 0.1557),
+    "Standard_D4lds_v5": (0.1729, 0.3113),
+    "Standard_D8lds_v5": (0.3458, 0.6226),
+    "Standard_D16lds_v5": (0.6916, 1.2452),
+    "Standard_D32lds_v5": (1.3832, 2.4904),
+    "Standard_D48lds_v5": (2.0748, 3.7356),
+    "Standard_D64lds_v5": (2.7664, 4.9808),
+    "Standard_D96lds_v5": (4.1496, 7.4712),
     "Standard_D2s_v6": (0.0896, 0.1574),
     "Standard_D4s_v6": (0.1792, 0.3148),
     "Standard_D8s_v6": (0.3584, 0.6296),
@@ -262,6 +297,21 @@ _EXACT_UKS_GBP: Dict[str, Tuple[float, float]] = {
     "Standard_E48s_v5": (2.7564, 4.3800),
     "Standard_E64s_v5": (3.6752, 5.8400),
     "Standard_E96s_v5": (5.5128, 8.7600),
+    "Standard_E2ds_v5": (0.1271, 0.1962),
+    "Standard_E4ds_v5": (0.2542, 0.3925),
+    "Standard_E8ds_v5": (0.5083, 0.7849),
+    "Standard_E16ds_v5": (1.0166, 1.5698),
+    "Standard_E20ds_v5": (1.2708, 1.9623),
+    "Standard_E32ds_v5": (2.0332, 3.1396),
+    "Standard_E48ds_v5": (3.0498, 4.7094),
+    "Standard_E64ds_v5": (4.0664, 6.2792),
+    "Standard_E96ds_v5": (6.0996, 9.4188),
+    "Standard_NV6ads_A10_v5": (0.3609, 0.5476),
+    "Standard_NV12ads_A10_v5": (0.7519, 1.1254),
+    "Standard_NV18ads_A10_v5": (1.5037, 2.1263),
+    "Standard_NV36ads_A10_v5": (3.0074, 4.2525),
+    "Standard_NV72ads_A10_v5": (6.0148, 8.5050),
+    "Standard_NC24ads_A100_v4": (3.4517, 4.2818),
     "Standard_E2s_v6": (0.1204, 0.1882),
     "Standard_E4s_v6": (0.2408, 0.3764),
     "Standard_E8s_v6": (0.4816, 0.7528),
@@ -319,9 +369,14 @@ class HikePolicy:
     @property
     def label(self) -> str:
         if self.name == POLICY_SERVICE_HEALTH:
+            v3_tail = (
+                f"v3 +{self.v3_hike_pct:g}% elsewhere"
+                if self.v3_hike_pct > 0
+                else "0% in UK"
+            )
             return (
                 f"Service Health notices (EoL v1 +{self.v1_hike_pct:g}% & v2 +{self.v2_hike_pct:g}% global; "
-                "non-EoL v2/v3 regional +8-17% in 7 regions, 0% in UK)"
+                f"non-EoL v2/v3 regional +8-17% in 7 regions, {v3_tail})"
             )
         if (
             self.v1_hike_pct == self.v2_hike_pct == self.v3_hike_pct
@@ -464,6 +519,31 @@ class PricingClient:
             source="fallback-table",
         )
 
+    def prewarm(self, pairs: Iterable[Tuple[str, str]], *, max_workers: int = 6) -> None:
+        """Concurrently pre-fetch Retail Prices API items for unique ``(region, arm_sku)`` pairs."""
+        if self._offline:
+            return
+        missing: List[Tuple[str, str]] = []
+        seen = set()
+        with self._lock:
+            for reg_raw, sku_raw in pairs:
+                reg = (reg_raw or "uksouth").strip().lower()
+                sku = (sku_raw or "").strip()
+                if not sku:
+                    continue
+                key = (reg, sku.lower())
+                if key not in self._cache and key not in seen:
+                    seen.add(key)
+                    missing.append((reg, sku))
+        if not missing:
+            return
+        if len(missing) == 1 or max_workers <= 1:
+            for reg, sku in missing:
+                self._fetch_items(reg, sku)
+            return
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(missing))) as pool:
+            list(pool.map(lambda pair: self._fetch_items(pair[0], pair[1]), missing))
+
     def quote_target_sku(
         self,
         arm_sku: str,
@@ -478,21 +558,26 @@ class PricingClient:
         reg = (region or "uksouth").strip().lower()
         meter_os = effective_os_meter(os_type, license_type)
         prio = (priority or "Regular").strip().lower()
-        sku_clean = (arm_sku or "Standard_D2s_v5").strip()
+        sku_clean = (arm_sku or "Standard_D2ds_v5").strip()
+        parent_clean = parent_unconstrained_sku(sku_clean)
 
         payg_rate: Optional[float] = None
         linux_rate: Optional[float] = None
+        live_ri_3y_hr: Optional[float] = None
         cur = self.currency
         source = "fallback-table"
 
         if not self._offline and sku_clean:
-            items = self._fetch_items(reg, sku_clean)
-            matched = _select_meter(items, meter_os=meter_os, priority=prio)
-            if matched is not None:
-                payg_rate, _, cur = matched
-                linux_matched = _select_meter(items, meter_os="Linux", priority=prio)
-                linux_rate = linux_matched[0] if linux_matched is not None else payg_rate
-                source = "retail-api"
+            for cand_sku in dict.fromkeys((sku_clean, parent_clean)):
+                items = self._fetch_items(reg, cand_sku)
+                matched = _select_meter(items, meter_os=meter_os, priority=prio)
+                if matched is not None:
+                    payg_rate, _, cur = matched
+                    linux_matched = _select_meter(items, meter_os="Linux", priority=prio)
+                    linux_rate = linux_matched[0] if linux_matched is not None else payg_rate
+                    live_ri_3y_hr = _select_reservation_3y_hourly(items)
+                    source = "retail-api"
+                    break
 
         if payg_rate is None:
             payg_rate = _fallback_arm_sku_rate(
@@ -511,7 +596,8 @@ class PricingClient:
             ri_3y = feb_payg
         else:
             os_surcharge = max(0.0, feb_payg - feb_linux)
-            ri_3y = round((feb_linux * 0.42) + os_surcharge, 4)
+            base_ri_hr = (live_ri_3y_hr * mult) if live_ri_3y_hr is not None else (feb_linux * 0.42)
+            ri_3y = round(base_ri_hr + os_surcharge, 4)
 
         return TargetPriceQuote(
             sku=sku_clean,
@@ -530,27 +616,44 @@ class PricingClient:
 
         odata_filter = (
             f"serviceName eq 'Virtual Machines' and armRegionName eq '{region}' "
-            f"and armSkuName eq '{arm_sku}' and priceType eq 'Consumption'"
+            f"and armSkuName eq '{arm_sku}'"
         )
         query = urllib.parse.urlencode({"currencyCode": self.currency, "$filter": odata_filter})
-        url = f"{self._endpoint}?{query}"
+        next_url: Optional[str] = f"{self._endpoint}?{query}"
+        base_host = (urllib.parse.urlsplit(self._endpoint).hostname or "").lower()
         items: List[Dict[str, Any]] = []
-        try:
-            response = self._transport.request("GET", url, {"Accept": "application/json"}, None, self._timeout)
-            if 200 <= response.status < 300:
-                payload = json.loads(response.body.decode("utf-8-sig"))
-                raw_items = payload.get("Items") if isinstance(payload, dict) else None
-                if isinstance(raw_items, list):
-                    items = [item for item in raw_items if isinstance(item, dict)]
-            else:
+        seen_urls = set()
+        for _ in range(_MAX_PRICE_PAGES):
+            if not next_url or next_url in seen_urls:
+                break
+            seen_urls.add(next_url)
+            try:
+                response = self._transport.request("GET", next_url, {"Accept": "application/json"}, None, self._timeout)
+                if 200 <= response.status < 300:
+                    payload = json.loads(response.body.decode("utf-8-sig"))
+                    raw_items = payload.get("Items") if isinstance(payload, dict) else None
+                    if isinstance(raw_items, list):
+                        items.extend(item for item in raw_items if isinstance(item, dict))
+                    raw_next = str(payload.get("NextPageLink") or "").strip() if isinstance(payload, dict) else ""
+                    next_host = (urllib.parse.urlsplit(raw_next).hostname or "").lower() if raw_next else ""
+                    next_url = raw_next if raw_next and next_host == base_host else None
+                else:
+                    self.api_failures += 1
+                    break
+            except (TransportError, ValueError, UnicodeDecodeError) as exc:
+                log.debug("Retail Prices API lookup failed for %s in %s: %s", arm_sku, region, exc)
                 self.api_failures += 1
-        except (TransportError, ValueError, UnicodeDecodeError) as exc:
-            log.debug("Retail Prices API lookup failed for %s in %s: %s", arm_sku, region, exc)
-            self.api_failures += 1
+                break
 
         with self._lock:
             self._cache[key] = items
         return items
+
+
+def _date_sort_key(iso_text: str) -> int:
+    """Turn an ISO 8601 date prefix such as '2026-10-15T00:00:00Z' into integer 20261015."""
+    digits = re.sub(r"\D", "", (iso_text or "")[:10])[:8]
+    return int(digits.ljust(8, "0")) if digits else 0
 
 
 def _select_meter(
@@ -561,9 +664,12 @@ def _select_meter(
     want_spot = priority == "spot"
     want_low = priority == "low"
 
-    candidates: List[Tuple[int, str, float, str, str]] = []
+    candidates: List[Tuple[int, int, int, float, str, str]] = []
     for item in items:
         if str(item.get("type") or "") != "Consumption":
+            continue
+        uom = str(item.get("unitOfMeasure") or "").strip().lower()
+        if uom and "hour" not in uom:
             continue
         product = str(item.get("productName") or "")
         if "Cloud Services" in product or "Dedicated Host" in product:
@@ -584,18 +690,52 @@ def _select_meter(
             continue
         if price <= 0:
             continue
-        # Prefer primary/non-promo meters and the most recent effectiveStartDate
         is_promo = 1 if "promo" in combined else 0
-        start_date = str(item.get("effectiveStartDate") or "")
+        not_primary = 1 if item.get("isPrimaryMeterRegion") is False else 0
+        date_rank = -_date_sort_key(str(item.get("effectiveStartDate") or ""))
         currency = str(item.get("currencyCode") or DEFAULT_CURRENCY).upper()
-        candidates.append((is_promo, start_date, price, meter_name, currency))
+        candidates.append((is_promo, not_primary, date_rank, price, meter_name, currency))
 
     if not candidates:
         return None
-    # Sort by non-promo first, then latest effectiveStartDate
-    candidates.sort(key=lambda entry: (entry[0], -int(entry[1][:4]) if entry[1][:4].isdigit() else 0))
-    _, _, price, meter_name, currency = candidates[0]
+    candidates.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    _, _, _, price, meter_name, currency = candidates[0]
     return price, meter_name, currency
+
+
+def _select_reservation_3y_hourly(items: List[Dict[str, Any]]) -> Optional[float]:
+    """Extract the 3-Year Linux Reservation effective hourly compute rate from Retail Prices API items."""
+    candidates: List[Tuple[int, int, int, float]] = []
+    for item in items:
+        if str(item.get("type") or "") != "Reservation":
+            continue
+        term = str(item.get("reservationTerm") or "").strip().lower()
+        if term not in ("3 years", "3 year", "3yr"):
+            continue
+        product = str(item.get("productName") or "")
+        if "Cloud Services" in product or "Dedicated Host" in product or "windows" in product.lower():
+            continue
+        combined = f"{item.get('skuName') or ''} {item.get('meterName') or ''}".lower()
+        if "spot" in combined or "low priority" in combined:
+            continue
+        try:
+            total_3y_price = float(item.get("retailPrice"))
+        except (TypeError, ValueError):
+            continue
+        if total_3y_price <= 0:
+            continue
+        hourly = round(total_3y_price / HOURS_IN_3_YEARS, 4)
+        if hourly <= 0:
+            continue
+        is_promo = 1 if "promo" in combined else 0
+        not_primary = 1 if item.get("isPrimaryMeterRegion") is False else 0
+        date_rank = -_date_sort_key(str(item.get("effectiveStartDate") or ""))
+        candidates.append((is_promo, not_primary, date_rank, hourly))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    return candidates[0][3]
 
 
 def _fallback_hourly_rate(
@@ -631,21 +771,32 @@ def _fallback_arm_sku_rate(
     currency: str,
 ) -> float:
     want_windows = meter_os == "Windows"
-    exact = _EXACT_UKS_GBP.get(arm_sku)
+    parent_sku = parent_unconstrained_sku(arm_sku)
+    exact = _EXACT_UKS_GBP.get(arm_sku) or _EXACT_UKS_GBP.get(parent_sku)
     if exact is not None:
         base_gbp = exact[1] if want_windows else exact[0]
     else:
-        up = arm_sku.upper()
-        if "LS_V5" in up:
+        up = parent_sku.upper()
+        if "LDS_V5" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Dldsv5"]
+        elif "LS_V5" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Dlsv5"]
         elif "LS_V6" in up or "ALS_V6" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Falsv6"]
+        elif "DS_V6" in up and "_E" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Edsv6"]
         elif "_V6" in up and "_E" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Esv6"]
+        elif "DS_V5" in up and "_E" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Edsv5"]
         elif "_V5" in up and "_E" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Esv5"]
+        elif "DS_V6" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Ddsv6"]
         elif "_V6" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Dsv6"]
+        elif "DS_V5" in up:
+            per_vcpu = _SERIES_PER_VCPU_GBP["Ddsv5"]
         elif "BS_V2" in up or "_B" in up:
             per_vcpu = _SERIES_PER_VCPU_GBP["Bsv2"]
         elif "LS_V4" in up:
