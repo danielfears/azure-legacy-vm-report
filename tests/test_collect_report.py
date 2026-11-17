@@ -424,5 +424,56 @@ class CollectAndReportTests(unittest.TestCase):
         self.assertEqual(data.records[0].name, "vmss-v3_0")
         self.assertEqual(data.records[0].instance_count, 1)
 
+    def test_current_bsv2_skipped_in_non_hiked_region_but_kept_in_hiked_region(self) -> None:
+        class Bsv2Transport(FallbackComputeTransport):
+            def request(self, method, url, headers, body, timeout):
+                parsed = urllib.parse.urlsplit(url)
+                vms_path = f"/subscriptions/{SUB_ID}/providers/Microsoft.Compute/virtualMachines"
+                if parsed.path == vms_path:
+                    return _resp({
+                        "value": [
+                            {
+                                "id": f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-bsv2-uks",
+                                "name": "vm-bsv2-uks",
+                                "location": "uksouth",
+                                "properties": {
+                                    "hardwareProfile": {"vmSize": "Standard_B2as_v2"},
+                                    "storageProfile": {"osDisk": {"osType": "Linux"}},
+                                    "instanceView": {"statuses": [{"code": "PowerState/running"}]},
+                                },
+                            },
+                            {
+                                "id": f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-bsv2-weu",
+                                "name": "vm-bsv2-weu",
+                                "location": "westeurope",
+                                "properties": {
+                                    "hardwareProfile": {"vmSize": "Standard_B2as_v2"},
+                                    "storageProfile": {"osDisk": {"osType": "Linux"}},
+                                    "instanceView": {"statuses": [{"code": "PowerState/running"}]},
+                                },
+                            },
+                        ]
+                    })
+                if parsed.path.endswith("/virtualMachineScaleSets"):
+                    return _resp({"value": []})
+                return super().request(method, url, headers, body, timeout)
+
+        transport = Bsv2Transport()
+        pricing = PricingClient(transport, currency="GBP", offline=True)
+        data = collect_tenant(
+            TenantSpec(tenant_id=TENANT_ID),
+            tokens=StaticTokens(),
+            transport=transport,
+            endpoint="https://management.azure.com",
+            pricing=pricing,
+            policy=HikePolicy(),
+            options=CollectOptions(use_resource_graph=False),
+        )
+        # uksouth B2as_v2 (0% hike, current family) is skipped as modern; westeurope B2as_v2 (+9% hike) is kept!
+        self.assertEqual([r.name for r in data.records], ["vm-bsv2-weu"])
+        self.assertEqual(data.modern_resources_skipped, 1)
+        self.assertIn("Current Family", data.records[0].migration_wave)
+        self.assertNotIn("az vm resize", data.records[0].migration_cli_hint)
+
 
 

@@ -81,6 +81,7 @@ VM_FIELDS = [
     "ri_expiry_date",
     "advisor_recommendation",
     "advisor_monthly_saving",
+    "target_quota_family",
     "quota_status",
     "migration_wave",
     "migration_cli_hint",

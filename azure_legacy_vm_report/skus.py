@@ -160,7 +160,9 @@ def _resolve_concrete_targets(
     b_n = _snap_size(max(2, vcpus), _STD_B_VCPUS)
 
     if ser in ("Bsv2", "Basv2", "Bpsv2"):
-        return sku, f"Standard_D{d_n}s_v6", "standardBSv2Family"
+        is_low_mem = any(tok in up_sku for tok in ("LS_V2", "ALS_V2", "PLS_V2", "TS_V2", "ATS_V2", "PTS_V2"))
+        v6_b = f"Standard_D{d_n}ls_v6" if is_low_mem else f"Standard_D{d_n}s_v6"
+        return sku, v6_b, "standardBSv2Family"
 
     if ser == "Bv1":
         if up_sku.endswith(("_B1LS", "_B1S")):
@@ -251,6 +253,15 @@ class SkuInfo:
     target_current_sku: str = ""
     target_quota_family: str = ""
     ri_purchase_blocked: bool = False
+
+    @property
+    def is_current_family(self) -> bool:
+        """True for active non-EoL families (e.g. Bsv2, Basv2, Lsv3, NCasT4_v3, v4-v6) with no retirement date."""
+        return (
+            not self.in_global_25_notice
+            and self.lifecycle_stage in (STAGE_EXTENDED, STAGE_CURRENT)
+            and self.retirement_date == "Not announced"
+        )
 
     def __post_init__(self) -> None:
         v5_sku, cur_sku, q_fam = _resolve_concrete_targets(

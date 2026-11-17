@@ -701,10 +701,10 @@ def evaluate_quota_headroom(
     if usage.limit == 0:
         return f"Quota 0/{usage.limit} ({usage.family_name})"
     if needed_vcpus > avail:
-        return f"Quota Increase Needed (needs {needed_vcpus}, {avail} free / {usage.limit})"
+        return f"Quota Increase Needed ({usage.family_name}: needs {needed_vcpus}, {avail} free / {usage.limit})"
     if total_needed > avail:
-        return f"Quota Increase Needed (fleet needs {total_needed}, {avail} free / {usage.limit})"
-    return f"Quota OK ({avail} free / {usage.limit} limit)"
+        return f"Quota Increase Needed ({usage.family_name}: fleet needs {total_needed}, {avail} free / {usage.limit})"
+    return f"Quota OK ({avail} free / {usage.limit} {usage.family_name})"
 
 
 def fetch_vm_schedules(

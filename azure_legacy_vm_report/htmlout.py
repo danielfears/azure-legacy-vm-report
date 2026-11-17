@@ -1054,22 +1054,32 @@ def _render_executive_brief(report: Report, cur: str) -> str:
         else "Azure Advisor Cost recommendations matched to legacy VMs"
     )
 
-    # Panel 5: Quota & RI Check
+    # Panel 5: Quota & RI Check (deduplicated by subscription + region + target quota family, active blockers first)
     any_quota_checked = any(bool(r.quota_status) for r in recs)
-    quota_groups = {}
+    quota_by_fam = {}
     for r in recs:
         if "Increase Needed" in r.quota_status or "Quota 0/" in r.quota_status:
-            key = (r.subscription_name, r.region, r.quota_status)
-            quota_groups[key] = quota_groups.get(key, 0) + r.instance_count
+            fam_id = (r.target_quota_family or r.quota_status.split("(")[-1].split(":")[0].rstrip(")")).strip().lower()
+            qkey = (r.subscription_id.lower(), r.region.lower(), fam_id)
+            prev = quota_by_fam.get(qkey)
+            if prev is None or (r.is_billed_now and not prev[0]):
+                quota_by_fam[qkey] = (r.is_billed_now, r.subscription_name, r.region, r.quota_status)
     ri_cov = sum(r.instance_count for r in recs if "RI Covered" in r.ri_status or "Partial RI" in r.ri_status)
     ri_short = f"{plural(ri_cov, 'active RI')}" if ri_cov != 1 else "1 active RI"
 
-    if quota_groups:
-        first_q = next(iter(quota_groups))
-        q_val = f"{plural(len(quota_groups), 'quota uplift')} needed"
-        q_sub = ri_short
-        q_tip = f"{first_q[0]} ({first_q[1]}): {first_q[2]}"
-        q_cls = "bad"
+    if quota_by_fam:
+        ordered_q = sorted(quota_by_fam.values(), key=lambda x: (0 if x[0] else 1, x[1].lower()))
+        active_q = sum(1 for item in ordered_q if item[0])
+        off_q = len(ordered_q) - active_q
+        q_val = f"{plural(len(ordered_q), 'quota uplift')} needed"
+        if active_q and off_q:
+            q_sub = f"{active_q} active, {off_q} off \u00b7 {ri_short}"
+        elif off_q and not active_q:
+            q_sub = f"Deallocated only \u00b7 {ri_short}"
+        else:
+            q_sub = ri_short
+        q_tip = " | ".join(f"{sq[1]} ({sq[2]}): {sq[3]}" for sq in ordered_q[:3])
+        q_cls = "bad" if active_q > 0 else "warn"
     elif any_quota_checked:
         q_val = "Quotas ready"
         q_sub = ri_short

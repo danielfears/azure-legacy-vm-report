@@ -22,6 +22,7 @@ from .skus import SkuInfo, diskless_pool_v5_sku
 WAVE_1_RESIZE = "Wave 1: Drop-in v5 Resize (SCSI)"
 WAVE_2_POOL = "Wave 2: Managed Pool Replace (AKS/PaaS)"
 WAVE_3_REBUILD = "Wave 3: Gen2 / NVMe or Specialised Rebuild"
+WAVE_CURRENT = "Current Family (Optional v6 Upgrade)"
 
 TYPE_VM = "VirtualMachine"
 TYPE_VMSS = "VirtualMachineScaleSet"
@@ -161,6 +162,7 @@ class LegacyVmRecord:
     ri_expiry_date: str = ""
     advisor_recommendation: str = ""
     advisor_monthly_saving: float = 0.0
+    target_quota_family: str = ""
     quota_status: str = ""
     migration_wave: str = ""
     migration_cli_hint: str = ""
@@ -260,6 +262,7 @@ class LegacyVmRecord:
             "ri_expiry_date": self.ri_expiry_date,
             "advisor_recommendation": self.advisor_recommendation,
             "advisor_monthly_saving": round(self.advisor_monthly_saving, 2),
+            "target_quota_family": self.target_quota_family,
             "quota_status": self.quota_status,
             "migration_wave": self.migration_wave,
             "migration_cli_hint": self.migration_cli_hint,
@@ -302,6 +305,12 @@ def classify_migration_wave(
     rname = (name or "<name>").strip()
     v5_sku = effective_v5_sku or sku_info.target_v5_sku or "Standard_D2ds_v5"
     cur_sku = sku_info.target_current_sku or "Standard_D2s_v6"
+
+    if v5_sku.strip().lower() == sku_info.sku.strip().lower():
+        return (
+            WAVE_CURRENT,
+            f"Already on current {sku_info.series} family; optional Gen2/NVMe upgrade to {cur_sku}",
+        )
 
     if sku_info.series in (
         "NP", "HC", "HB", "HBv2", "H",
@@ -381,6 +390,7 @@ def build_legacy_record(
     ri_status: str = "",
     ri_expiry_date: str = "",
     advisor_info: Optional[AdvisorRightSizeInfo] = None,
+    target_quota_family: str = "",
     quota_status: str = "",
 ) -> LegacyVmRecord:
     billed_now = is_power_state_billed(power_state) and instance_count > 0
@@ -615,6 +625,7 @@ def build_legacy_record(
         ri_expiry_date=ri_expiry_date,
         advisor_recommendation=adv_text,
         advisor_monthly_saving=adv_save,
+        target_quota_family=target_quota_family or sku_info.target_quota_family,
         quota_status=quota_status,
         migration_wave=wave_label,
         migration_cli_hint=cli_hint,

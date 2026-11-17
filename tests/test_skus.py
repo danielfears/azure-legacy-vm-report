@@ -182,9 +182,13 @@ class SkuClassificationTests(unittest.TestCase):
         self.assertEqual(nc6v2.category, "GPU accelerated")
         self.assertEqual(nc6v2.target_v5_sku, "Standard_NV6ads_A10_v5")
 
-        # Modern v4 diskless vs temp-disk targets
+        # Modern v4 diskless vs temp-disk targets & current-family Bsv2 low-memory v6 target
         self.assertEqual(d4sv4.target_v5_sku, "Standard_D4s_v5")
         self.assertEqual(d4dsv4.target_v5_sku, "Standard_D4ds_v5")
+        b2als_v2 = classify_vm_sku("Standard_B2als_v2")
+        assert b2als_v2 is not None
+        self.assertTrue(b2als_v2.is_current_family)
+        self.assertEqual(b2als_v2.target_current_sku, "Standard_D2ls_v6")
 
     def test_include_modern_regional_skus_option(self) -> None:
         self.assertIsNone(classify_vm_sku("Standard_D4s_v5", include_modern_regional=False))

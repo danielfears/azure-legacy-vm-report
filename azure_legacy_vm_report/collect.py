@@ -255,6 +255,14 @@ def collect_tenant(
         if sku_info is None:
             data.modern_resources_skipped += 1
             continue
+        row_reg = str(row.get("location") or "uksouth").strip().lower()
+        if (
+            not include_modern
+            and sku_info.is_current_family
+            and policy.hike_pct_for(sku_info, row_reg)[0] <= 0.0
+        ):
+            data.modern_resources_skipped += 1
+            continue
         if sku_info.generation.lower() not in allowed_gens:
             continue
 
@@ -276,6 +284,12 @@ def collect_tenant(
             continue
         sku_info = classify_vm_sku(pool.vm_size, include_modern_regional=include_modern)
         if sku_info is None or sku_info.generation.lower() not in allowed_gens:
+            continue
+        if (
+            not include_modern
+            and sku_info.is_current_family
+            and policy.hike_pct_for(sku_info, pool.location)[0] <= 0.0
+        ):
             continue
         # Check if a backing VMSS in the nodeResourceGroup already represents this pool
         already_present = any(
@@ -578,6 +592,7 @@ def collect_tenant(
             ri_status=ri_status,
             ri_expiry_date=ri_expiry,
             advisor_info=adv_info,
+            target_quota_family=eff_q_fam,
             quota_status=q_status,
         )
         data.records.append(record)
