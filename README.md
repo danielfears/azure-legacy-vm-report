@@ -93,7 +93,7 @@ In Azure Resource Manager, many **v1** VM sizes do **not** have a `_v1` suffix i
   `HC` (`Standard_HC44rs`), `HB` (`Standard_HB60rs`), `H` (`Standard_H8`–`Standard_H16mr`), `M`
   (`Standard_M8ms`–`Standard_M128m`), `NC`/`ND`/`NV` v1, and `DCs` v1.
 
-Modern generations (`v4`, `v5`, `v6`, `v7`) are automatically skipped and counted separately.
+Modern generations (`v4`, `v5`, `v6`, `v7`) — as well as already-current, non-EoL `_v2`/`_v3` families with no retirement date (`Bsv2`, `Basv2`, `Bpsv2`, `Lsv3`, `Lasv3`, `NCasT4_v3`) in `0%`-hike regions — are automatically skipped and counted separately, so workloads migrated from `Bv1` onto `Bsv2` drop cleanly off subsequent scans (use `--include-regional-skus` to include them regardless of region).
 
 ## February 2027 price-hike models
 
