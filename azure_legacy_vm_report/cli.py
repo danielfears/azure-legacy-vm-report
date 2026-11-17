@@ -471,6 +471,12 @@ def run_cli(
     az_cli: Optional[AzCli] = None,
     now_fn: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
+    if stdout is None and hasattr(sys.stdout, "reconfigure"):
+        with contextlib.suppress(Exception):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if stderr is None and hasattr(sys.stderr, "reconfigure"):
+        with contextlib.suppress(Exception):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
     environ = os.environ if env is None else env
