@@ -63,6 +63,12 @@ def render_markdown(report: Report) -> str:
         f"- **Tenants:** {len(report.tenants)}",
     ]
     lines += [f"- **Note:** {markdown_escape(note)}" for note in report.notes]
+    if report.update_notice is not None:
+        un = report.update_notice
+        lines.append(
+            f"- **Update available:** [v{markdown_escape(un.latest_version)}]({un.release_url}) "
+            f"(generated with v{markdown_escape(un.current_version)})"
+        )
     lines += ["", "## Summary by generation", ""]
 
     headers = [

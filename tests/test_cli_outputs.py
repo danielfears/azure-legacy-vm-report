@@ -187,3 +187,77 @@ class CliAndOutputsTests(unittest.TestCase):
         self.assertIn("default-src 'none'", csp)
         self.assertIn(csp_hash(STYLE), csp)
         self.assertIn(csp_hash(SCRIPT), csp)
+
+    def test_update_check_banner_caching_fail_open_and_url_sanitisation(self) -> None:
+        from datetime import datetime
+        from azure_legacy_vm_report.dates import UTC
+        from azure_legacy_vm_report.htmlout import render_html
+        from azure_legacy_vm_report.pricing import HikePolicy
+        from azure_legacy_vm_report.report import build_report
+        from azure_legacy_vm_report.transport import Response, Transport, TransportError
+        from azure_legacy_vm_report.update_check import (
+            REPO_URL,
+            check_for_update,
+            is_update_check_disabled,
+        )
+
+        class FakeGhTransport(Transport):
+            def __init__(self, status=200, payload=None, fail=False):
+                self.status = status
+                self.payload = payload or {}
+                self.fail = fail
+                self.calls = 0
+
+            def request(self, method, url, headers, body, timeout):
+                self.calls += 1
+                if self.fail:
+                    raise TransportError("blocked by firewall")
+                return Response(self.status, {}, json.dumps(self.payload).encode("utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "update-check.json"
+            # Untrusted html_url is rewritten safely to the canonical GitHub repository releases URL
+            gh = FakeGhTransport(
+                200,
+                {"tag_name": "v2.0.0", "html_url": "https://evil.example/phish", "prerelease": False, "draft": False},
+            )
+            notice = check_for_update("1.1.0", gh, cache_path=cache_file, clock=lambda: 1000.0)
+            self.assertIsNotNone(notice)
+            assert notice is not None
+            self.assertEqual(notice.latest_version, "2.0.0")
+            self.assertTrue(notice.release_url.startswith(REPO_URL + "/"))
+            self.assertEqual(gh.calls, 1)
+
+            # Second call within 24h reads from cache with 0 network requests
+            notice_cached = check_for_update("1.1.0", gh, cache_path=cache_file, clock=lambda: 2000.0)
+            self.assertEqual(notice_cached, notice)
+            self.assertEqual(gh.calls, 1)
+
+            # Up-to-date caller gets None
+            self.assertIsNone(check_for_update("2.0.0", gh, cache_path=cache_file, clock=lambda: 2000.0))
+
+            # Firewall block / timeout fails open silently
+            blocked_gh = FakeGhTransport(fail=True)
+            self.assertIsNone(check_for_update("1.1.0", blocked_gh, cache_path=None))
+
+            # Env var and flags disable update check
+            self.assertTrue(is_update_check_disabled(disabled_flag=True))
+            self.assertTrue(is_update_check_disabled(env={"AZURE_LEGACY_VM_REPORT_NO_UPDATE_CHECK": "1"}))
+            self.assertFalse(is_update_check_disabled(env={}))
+
+            # Rendered HTML includes the update link pill while keeping CSP default-src 'none'
+            rep = build_report(
+                [],
+                version="1.1.0",
+                generated_at=datetime(2026, 11, 17, 14, 0, tzinfo=UTC),
+                tz=UTC,
+                tz_name="UTC",
+                currency="GBP",
+                hours_per_month=730.0,
+                policy=HikePolicy(),
+                update_notice=notice,
+            )
+            html_out = render_html(rep)
+            self.assertIn("Update available: v2.0.0", html_out)
+            self.assertIn(notice.release_url, html_out)
+            self.assertIn("default-src 'none'", html_out)

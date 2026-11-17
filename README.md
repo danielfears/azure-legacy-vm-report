@@ -154,7 +154,7 @@ Running `azure-legacy-vm-report` with no flags generates and opens the interacti
 - `…-summary.csv`: generation summary (`v1`, `v2`, `v3`, `Total`) per tenant and across all tenants.
 - `….json`: complete structured report.
 - `….md`: GitHub-flavoured Markdown report.
-- `….html`: self-contained dark-themed interactive dashboard (protected by SHA-256 Content-Security-Policy hashes) featuring a 5-card executive KPI strip (*Hike Exposure*, *Detected Discount*, *Hike Concentration*, *Azure Advisor*, *Quota & RIs*), tabbed zero-horizontal-scroll views (*By Subscription*, *By SKU*, *By Wave*, *By Management Group*, *VM Inventory*), interactive per-VM/SKU/fleet Stay-vs-Migrate tickboxes, `v5`/`v6` PAYG & 3-Year RI tier switching, *Stop Advisor idle VMs* modelling, 1-click *Hiked* and *Active* filters, and a collapsible assumptions drawer.
+- `….html`: self-contained dark-themed interactive dashboard (protected by SHA-256 Content-Security-Policy hashes) featuring a 5-card executive KPI strip (*Hike Exposure*, *Detected Discount*, *Hike Concentration*, *Azure Advisor*, *Quota & RIs*), tabbed zero-horizontal-scroll views (*By Subscription*, *By SKU*, *By Wave*, *By Management Group*, *VM Inventory*), interactive per-VM/SKU/fleet Stay-vs-Migrate tickboxes, `v5`/`v6` PAYG & 3-Year RI tier switching, *Stop Advisor idle VMs* modelling, 1-click *Hiked* and *Active* filters, a collapsible assumptions drawer, and a non-blocking release-update banner when a newer version is available on GitHub (cached for 24 hours; disable with `--no-update-check` or `AZURE_LEGACY_VM_REPORT_NO_UPDATE_CHECK=1`).
 
 ## Development & tests
 

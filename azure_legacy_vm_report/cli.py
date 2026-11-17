@@ -79,6 +79,12 @@ from .report import Report, build_report
 from .skus import EXTENDED_GENERATIONS, LEGACY_GENERATIONS
 from .textfmt import clean_text, plural
 from .transport import Transport, UrllibTransport
+from .update_check import (
+    UpdateNotice,
+    check_for_update,
+    default_cache_path,
+    is_update_check_disabled,
+)
 
 PROG = "azure-legacy-vm-report"
 DEFAULT_TZ = "Europe/London"
@@ -299,6 +305,10 @@ def build_parser() -> argparse.ArgumentParser:
     net.add_argument("--resource-graph-api-version", default="2022-10-01", metavar="VER")
     net.add_argument("--compute-api-version", default="2024-07-01", metavar="VER")
     net.add_argument("--cost-management-api-version", default="2023-11-01", metavar="VER")
+    net.add_argument(
+        "--no-update-check", action="store_true",
+        help="Skip checking GitHub Releases for a newer version of azure-legacy-vm-report.",
+    )
     net.add_argument("--demo", action="store_true", help="Run on synthetic data with no Azure login required.")
     net.add_argument("-q", "--quiet", action="store_true", help="Suppress progress messages on stderr.")
     net.add_argument("-v", "--verbose", action="store_true", help="Log HTTP requests and detailed errors to stderr.")
@@ -555,10 +565,39 @@ def run_cli(
         if not args.quiet:
             _progress(err, f"Scanning {plural(len(specs), 'tenant')} for legacy ({', '.join(generations)}) VMs\u2026")
 
-        raw_results = _collect_all(specs, tokens, active_transport, cloud.arm, pricing, policy, collect_opts, args.jobs)
+        skip_update = is_update_check_disabled(
+            disabled_flag=bool(getattr(args, "no_update_check", False)),
+            demo=bool(args.demo),
+            offline_prices=offline_prices,
+            env=environ,
+        )
+        update_notice: Optional[UpdateNotice] = None
+        if skip_update:
+            raw_results = _collect_all(
+                specs, tokens, active_transport, cloud.arm, pricing, policy, collect_opts, args.jobs
+            )
+        else:
+            cache_file = default_cache_path(environ) if transport is None else None
+            with ThreadPoolExecutor(max_workers=1) as upd_pool:
+                upd_future = upd_pool.submit(
+                    check_for_update, __version__, active_transport, cache_path=cache_file
+                )
+                raw_results = _collect_all(
+                    specs, tokens, active_transport, cloud.arm, pricing, policy, collect_opts, args.jobs
+                )
+                with contextlib.suppress(Exception):
+                    update_notice = upd_future.result(timeout=0.5)
+
         merged_results, dropped = merge_repeats(raw_results)
         if dropped:
             notes.append("Duplicate tenant entries resolved to the same tenant GUID and were merged.")
+
+        if update_notice is not None and not args.quiet:
+            _progress(
+                err,
+                f"Update available: v{update_notice.current_version} -> v{update_notice.latest_version} "
+                f"({update_notice.release_url})",
+            )
 
         report = build_report(
             merged_results,
@@ -575,6 +614,7 @@ def run_cli(
             cost_source=args.cost_source,
             notes=notes,
             demo=args.demo,
+            update_notice=update_notice,
         )
 
         return _emit_outputs(args, report, formats, out, err, environ)

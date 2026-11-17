@@ -20,6 +20,7 @@ from .textfmt import (
     format_pct,
     plural,
 )
+from .update_check import REPO_URL
 
 STYLE = """
 :root{color-scheme:dark;--bg:#0a0b16;--panel:rgba(255,255,255,.035);--line:rgba(255,255,255,.09);--text:#e9eaf7;--muted:#9a9fc2;--accent:#b455ff;--accent2:#ff4fd1;--ok:#3ddc97;--warn:#ffb454;--bad:#ff5c7a}
@@ -47,6 +48,10 @@ p{margin:0}
 .hpill.bad{background:rgba(255,92,122,.13);border-color:rgba(255,92,122,.4);color:#ff8fa3}
 .hpill.ok{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.4);color:#66e8b1}
 .hpill.warn{background:rgba(255,180,84,.13);border-color:rgba(255,180,84,.4);color:#ffc97e}
+a.link-pill{text-decoration:none}
+a.link-pill:hover{border-color:var(--accent);color:#fff}
+footer a{color:var(--muted);text-decoration:none;border-bottom:1px dotted rgba(255,255,255,.25)}
+footer a:hover{color:var(--text);border-bottom-color:var(--accent)}
 .brief-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px}
 .bcard{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.022);display:flex;flex-direction:column;gap:3px}
 .bcard .bk{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.065em;color:var(--muted)}
@@ -1152,6 +1157,15 @@ def render_html(report: Report) -> str:
             "Nothing was read from Azure.</div>"
         )
 
+    upd = report.update_notice
+    upd_pill_html = (
+        f'<a class="hpill warn link-pill" href="{_e(upd.release_url)}" target="_blank" rel="noopener noreferrer" '
+        f'title="Running v{_e(upd.current_version)} \u2014 click to view release v{_e(upd.latest_version)} on GitHub">'
+        f"Update available: v{_e(upd.latest_version)} &rarr;</a>"
+        if upd is not None
+        else ""
+    )
+
     parts += [
         '<header class="panel">',
         '<div class="bar" style="margin:0">',
@@ -1160,6 +1174,7 @@ def render_html(report: Report) -> str:
         f'<p class="sub">Generated {_e(format_datetime(report.generated_at, tz))} ({_e(report.tz_name)}) '
         f"&middot; {_e(report.cost_basis_description)}</p>",
         "</div>",
+        upd_pill_html,
         "</div>",
     ]
     for note in report.notes:
@@ -1352,8 +1367,16 @@ def render_html(report: Report) -> str:
     for index, tenant in enumerate(report.tenants):
         parts.append(_render_tenant_section(report, tenant, index))
 
+    footer_upd = (
+        f' &middot; <a class="warn" href="{_e(upd.release_url)}" target="_blank" rel="noopener noreferrer">'
+        f"Update available: v{_e(upd.latest_version)}</a>"
+        if upd is not None
+        else ""
+    )
     parts += [
-        f"<footer>azure-legacy-vm-report {_e(report.version)} &middot; Read-only Azure inventory &amp; Retail Prices model</footer>",
+        f'<footer><a href="{_e(REPO_URL)}" target="_blank" rel="noopener noreferrer">'
+        f"azure-legacy-vm-report v{_e(report.version)}</a>{footer_upd} "
+        "&middot; Read-only Azure inventory &amp; Retail Prices model</footer>",
         "</main>",
         f"<script>{SCRIPT}</script>",
         "</body>",

@@ -19,6 +19,7 @@ from .model import (
 )
 from .pricing import HikePolicy
 from .skus import LEGACY_GENERATIONS
+from .update_check import UpdateNotice
 
 
 @dataclass
@@ -382,6 +383,7 @@ class Report:
     cost_source: str = COST_SOURCE_AUTO
     notes: List[str] = field(default_factory=list)
     demo: bool = False
+    update_notice: Optional[UpdateNotice] = None
 
     @property
     def last_month_label(self) -> str:
@@ -494,6 +496,7 @@ class Report:
             },
             "tenants": [tenant.to_dict() for tenant in self.tenants],
             "notes": list(self.notes),
+            "update_available": self.update_notice.to_dict() if self.update_notice is not None else None,
         }
 
 
@@ -718,6 +721,7 @@ def build_report(
     cost_source: str = COST_SOURCE_AUTO,
     notes: Optional[Sequence[str]] = None,
     demo: bool = False,
+    update_notice: Optional[UpdateNotice] = None,
 ) -> Report:
     gen_tuple = tuple(generations)
     tenant_reports: List[TenantReport] = []
@@ -754,4 +758,5 @@ def build_report(
         tenants=tenant_reports,
         notes=list(notes or ()),
         demo=demo,
+        update_notice=update_notice,
     )
