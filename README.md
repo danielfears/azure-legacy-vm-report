@@ -37,6 +37,37 @@ azure-legacy-vm-report --demo
 # WSL -> Windows CLI:  ./azure-legacy-vm-report-windows
 ```
 
+## Required Azure permissions (RBAC)
+
+The tool is strictly **read-only** and degrades gracefully if optional billing or reservation roles are unavailable:
+
+| Scope / Role | Purpose | If absent |
+|---|---|---|
+| **Reader** *(required)* | Discovers VMs, VM Scale Sets, AKS/Batch/ML pools, schedules, Management Groups, Advisor recommendations and regional Compute vCPU quotas. | Subscriptions without Reader access are skipped. |
+| **Cost Management Reader** *(recommended)* | Reads per-VM `ActualCost` and `UsageQuantity` (`Microsoft.CostManagement/query`) and auto-detects negotiated EA/MCA/MACC discounts vs public Retail PAYG. | Falls back automatically to schedule-adjusted Azure Retail Prices API rates. |
+| **Reservations Reader** *(optional)* | Lists active `Microsoft.Capacity/reservations` to match Single, Management Group and Shared Reserved Instances (with Instance Size Flexibility). | Marks RIs as unchecked / PAYG. |
+
+## Multi-tenant, subscription & service principal scope
+
+By default, the tool scans the tenant of your active `az` CLI session. You can widen or narrow scope on the CLI or via a JSON config file (see [`config.example.json`](config.example.json)):
+
+```sh
+# Scan every tenant known to `az account list --all` into one consolidated report
+azure-legacy-vm-report --all-tenants
+
+# Scan specific tenant(s) and/or restrict to specific subscription GUID(s)
+azure-legacy-vm-report --tenant <tenant-id-or-domain> --subscription <sub-guid>
+
+# Scan multiple tenants (az CLI and/or service principals via env-var secrets)
+export AZURE_LEGACY_VM_REPORT_SP_SECRET="..."
+azure-legacy-vm-report --config config.json
+
+# Target sovereign clouds (AzureCloud, AzureUSGovernment, AzureChinaCloud)
+azure-legacy-vm-report --cloud AzureUSGovernment
+```
+
+Client secrets are never stored in config files: `service-principal` entries reference an environment variable name via `clientSecretEnv`.
+
 ## How legacy v1, v2 and v3 SKUs & workload types are identified
 
 The tool scans across all VM-backed compute types in a tenant:
@@ -53,7 +84,8 @@ In Azure Resource Manager, many **v1** VM sizes do **not** have a `_v1` suffix i
 
 - **Explicit `_v1`, `_v2` and `_v3` SKUs**, including constrained-core variants (such as
   `Standard_DS14-4_v2` or `Standard_E16-4s_v3`) and isolated/HPC/GPU variants (`Standard_E64i_v3`,
-  `Standard_HB120rs_v2`, `Standard_NC6s_v3`, `Standard_NV12s_v3`, `Standard_DC4s_v3`).
+  `Standard_HB120rs_v2`, `Standard_NC6s_v2`, `Standard_ND40rs_v2`, `Standard_NV12s_v2`,
+  `Standard_NC6s_v3`, `Standard_NC4as_T4_v3`, `Standard_NV12s_v3`, `Standard_DC4s_v3`).
 - **Unversioned v1 SKUs** across `Av1` (`Standard_A0`–`Standard_A11`, `Basic_A0`–`Basic_A4`), `Bv1`
   (`Standard_B1ls`–`Standard_B20ms`), `D` and `Ds` (`Standard_D1`–`Standard_D14`,
   `Standard_DS1`–`Standard_DS14`), `F` and `Fs` (`Standard_F1`–`Standard_F16s`), `G` and `Gs`
@@ -103,12 +135,12 @@ By default (`--cost-source auto`), the tool queries **both** **Azure Cost Manage
 
 Beyond quantifying the February 2027 price-hike impact, the tool automatically evaluates the **cost and technical readiness of migrating** off legacy SKUs:
 
-- **Post-migration target SKU running cost ("Stay vs Modernise"):** maps every legacy `v1`/`v2`/`v3` size to its concrete 1:1 **compatibility bridge (`Ddsv5` / `Edsv5` / `Dldsv5` / `Bsv2` / `Lsv3`, preserving local temp disks, memory-optimised `D11`–`D15` -> `E`-series RAM, and constrained-core SQL/Oracle active vCPU caps)** and **strategic target (`v6` / `v7` / `Lsv4`)** SKU, quotes live target PAYG and **3-Year RI** rates from the Azure Retail Prices API, and applies the VM's observed duty cycle (billed hours) and negotiated EA/MCA discount ratio (`ActualCost / Retail`). Shows side-by-side **Current / mo**, **Feb 2027 "Do Nothing" / mo**, **Target v5 PAYG / mo**, **Monthly Savings vs Feb 2027**, and **Target v5 + 3-Year RI/SP / mo**.
-- **Migration Wave Planner & CLI hints:** groups the estate into **Wave 1: Drop-in v5 Resize (SCSI + temp-disk compatible)** (`az vm resize` / `az vmss update`), **Wave 2: Managed Pool Rolling Replace** (`az aks nodepool add`), and **Wave 3: Gen2 / NVMe or Specialised Rebuild (`v6`/`v7`)**.
+- **Post-migration target SKU running cost ("Stay vs Modernise"):** maps every legacy `v1`/`v2`/`v3` size to its concrete **compatibility bridge** (`Ddsv5` / `Edsv5` / `Dldsv5` for Wave 1 in-place resizes preserving local temp disks; diskless `Dsv5` / `Esv5` / `Dlsv5` for Wave 2 managed pools; `Edsv5`/`Esv5` for 7 GiB/vCPU memory-optimised `D11`–`D15`; constrained-core `E*-*ds_v5` preserving SQL/Oracle active vCPU caps; proportional `NVadsA10_v5` / `Bsv2` / `Lsv3`) and **strategic target (`v6` / `v7` / `Lsv4`)** SKU. Quotes live target PAYG and **3-Year RI** rates from the Azure Retail Prices API, preserves observed duty cycles and negotiated EA/MCA discount ratios (`ActualCost / Retail`), and compares **Spend Today**, **Feb 2027 Unmigrated Spend**, **Price Hike Penalty**, **Migrated Spend**, **Saving vs Doing Nothing**, and **Migrated + 3Y RI**.
+- **Migration Wave Planner & CLI hints:** groups the estate into **Wave 1: Drop-in v5 Resize (SCSI + temp-disk compatible)** (`az vm resize` / `az vmss update`), **Wave 2: Managed Pool Rolling Replace** (`az aks nodepool add` onto diskless `Dsv5`/`Esv5`), and **Wave 3: Gen2 / NVMe or Specialised Rebuild (`v6`/`v7`)**.
 - **Live Reserved Instance (RI) coverage & expiry detection:** queries `Microsoft.Capacity/reservations` (including Instance Size Flexibility vCPU ratios and Single / Management Group / Shared scopes, prioritising running VMs) to flag VMs currently shielded by an active RI (`RI Covered (exp YYYY-MM-DD)`) vs VMs exposed on PAYG where new `v1`/`v2`/`Dv3`/`Ev3` RI purchases and renewals ended on **01/07/2026**.
 - **Azure Advisor Right-Size + Modernise double-dip:** queries `AdvisorResources` via Azure Resource Graph to surface under-utilised VMs (`Advisor: Right-size to ...`) so teams can right-size and modernise in a single maintenance window.
 - **Regional vCPU family quota pre-flight:** checks `Microsoft.Compute/locations/*/usages` across all candidate subscriptions/regions for cumulative fleet target `v5` vCPU family headroom (`Quota OK` vs `Quota Increase Needed`).
-- **Management Group & Cost-Allocation Tag roll-up:** joins `ResourceContainers` to group subscriptions by Management Group hierarchy and surfaces cost-allocation tags (`CostCentre`, `Service`, `Owner`, `Environment`).
+- **Management Group & Cost-Allocation Tag roll-up:** joins `ResourceContainers` to group subscriptions by Management Group hierarchy (automatically unwrapping 1:1 CAF `<SubName>_mg` leaf wrappers to their parent archetype/portfolio Management Group) and surfaces cost-allocation tags (`CostCentre`, `Service`, `Owner`, `Environment`).
 - **Optional modern regional-hike scope (`--include-regional-skus`):** includes `v4`, `v5`, and `v6` VMs when scanning estates in the 7 EU/APAC regional-hike regions (`northeurope`, `westeurope`, `francecentral`, `francesouth`, `norwayeast`, `norwaywest`, `southeastasia`).
 
 ## Output formats
@@ -122,12 +154,11 @@ Running `azure-legacy-vm-report` with no flags generates and opens the interacti
 - `…-summary.csv`: generation summary (`v1`, `v2`, `v3`, `Total`) per tenant and across all tenants.
 - `….json`: complete structured report.
 - `….md`: GitHub-flavoured Markdown report.
-- `….html`: self-contained dark-themed interactive dashboard with live scenario buttons, editable
-  `v1 %` / `v2 %` / `v3 %` inputs, deallocated-VM cost toggle, sortable columns and instant search.
+- `….html`: self-contained dark-themed interactive dashboard (protected by SHA-256 Content-Security-Policy hashes) featuring a 5-card executive KPI strip (*Hike Exposure*, *Detected Discount*, *Hike Concentration*, *Azure Advisor*, *Quota & RIs*), tabbed zero-horizontal-scroll views (*By Subscription*, *By SKU*, *By Wave*, *By Management Group*, *VM Inventory*), interactive per-VM/SKU/fleet Stay-vs-Migrate tickboxes, `v5`/`v6` PAYG & 3-Year RI tier switching, *Stop Advisor idle VMs* modelling, 1-click *Hiked* and *Active* filters, and a collapsible assumptions drawer.
 
 ## Development & tests
 
 ```sh
-python3 -m unittest discover -s tests -v
-./azure-legacy-vm-report --demo --format all
+python -m unittest discover -s tests -v
+azure-legacy-vm-report --demo --all --no-open
 ```
